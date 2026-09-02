@@ -1,9 +1,11 @@
 # Warden — Threat Model
 
-Format per attack: **expected result → actual result → test**. "Actual
-result" is filled in as `packages/contracts/src/test/warden.test.ts` is run
-against the real compiled circuits — this file is not a description of
-theoretical security, it names the exact test that proves each line.
+Format per attack: **expected result → actual result → test**. Every test
+named below is real, passes today, and runs against the actual compiled
+`warden.compact` circuits — via `packages/contracts/src/test/warden.test.ts`
+(circuit-level) or `packages/sdk/src/client.test.ts` (two-party, SDK-level).
+This file is not a description of theoretical security; where something is
+*not* yet tested, it says so rather than implying otherwise (see #11).
 
 ## Standing assumptions
 
@@ -28,31 +30,35 @@ theoretical security, it names the exact test that proves each line.
    Expected: rejected. Actual: `createMandate` recomputes
    `mandateId(mandateContextOf(id))` from witness data and asserts it equals
    the public `id` — a preimage the attacker doesn't have cannot be produced.
-   Test: `createMandate rejects a context that does not hash to the claimed id`.
+   Test: `createMandate > rejects a context that does not hash to the
+   claimed id (forged mandate)`.
 
 2. **Alter a mandate's policy after its commitment is public.**
    Expected: rejected. Actual: any changed field changes `policyHash` and
    therefore `mandateId`; the altered context no longer matches the
-   already-registered `id`. Test: `authorize rejects a policy altered after
+   already-registered `id`. Test: `authorize — authorization and
+   impersonation > fails once the policy is altered locally after
    registration`.
 
 3. **Reuse authorization material across mandates.**
    Expected: rejected. Actual: every witness call and every ledger op is
    keyed by `id`; a secret/context valid for one mandate hashes to a
    different `id` than another mandate and simply will not match it. Test:
-   `authorize with mandate A's secret against mandate B's id fails`.
+   `authorize — authorization and impersonation > fails when called with an
+   unrelated agent's secret`.
 
 4. **Bypass revocation.**
    Expected: rejected, permanently. Actual: `authorize` asserts
    `!revoked.member(pid)` before anything else; there is no circuit that
-   removes an entry from `revoked` once inserted. Test: `authorize after
-   revoke always fails, including on the very next call`.
+   removes an entry from `revoked` once inserted. Test: `revoke > blocks
+   every future authorize call immediately and permanently`.
 
 5. **Exceed the spending limit.**
    Expected: rejected. Actual: `assert(newTotal <= ctx.policy.maxAmount, ...)`
-   in `authorize`. Test: `authorize rejects amount that would exceed cap`,
-   plus the exact-boundary case, `authorize accepts amount that lands
-   exactly on cap, rejects the next unit`.
+   in `authorize`. Tests: `authorize — policy boundaries > rejects a
+   cumulative amount that would exceed the cap` and, for the exact boundary,
+   `> authorizes an amount landing exactly on the cap, then rejects the next
+   unit`.
 
 6. **Replay an authorization (resubmit the same call twice).**
    Expected: the second call sees updated state and is evaluated against it,
@@ -60,47 +66,57 @@ theoretical security, it names the exact test that proves each line.
    on every successful call, so a second identical call is checked against
    the *new* totals, not the old ones — it either legitimately succeeds
    again (if still within cap/limit) or fails, but never double-counts as
-   if it were the first call. Test: `two identical authorize calls consume
-   the cap independently, not idempotently`.
+   if it were the first call. Test: `authorize — policy boundaries > two
+   back-to-back valid calls consume the cap independently, not
+   idempotently`.
 
 7. **Use another agent's (or the principal's) authorization.**
    Expected: rejected. Actual: `authorize` asserts
    `pkOf(agentSecret(id)) == ctx.agentPk` — an attacker without the real
    agent's secret cannot produce a matching commitment; the principal's
    secret does not satisfy this check either (see `docs/ARCHITECTURE.md` §4).
-   Test: `authorize called with the principal's secret instead of the
-   agent's fails`, `authorize called with an unrelated agent's secret fails`.
+   Tests: `authorize — authorization and impersonation > fails when the
+   caller only holds the principal's secret, not the agent's` and `> fails
+   when called with an unrelated agent's secret`.
 
 8. **Exploit witness dishonesty (lie about prior spend).**
    Expected: rejected. Actual: `assert(spentCommitment.lookup(pid) ==
    spendCommitment(priorSpent, priorNonce), ...)` — a witness that returns
    any `(total, nonce)` pair other than the one actually behind the current
-   on-chain commitment fails this check immediately. Test: `authorize
-   rejects a witness that understates prior spend to free up headroom`.
+   on-chain commitment fails this check immediately. Test: `authorize —
+   authorization and impersonation > fails when a witness understates prior
+   spend to free up headroom`.
 
 9. **Exploit stale state (act against an old, superseded commitment).**
-   Expected: rejected. Actual: same check as #8 — the on-chain
-   `spentCommitment` is always the source of truth the witness claim is
-   checked against, so acting on stale local state simply fails the
-   equality assertion rather than silently succeeding against outdated
-   totals. Test: `authorize using a stale local spend record after a
-   concurrent successful authorize fails`.
+   Expected: rejected. Actual: the same mechanism and the same test as #8 —
+   "stale local state" and "a witness lying about prior spend" are the same
+   failure mode from the circuit's point of view: whatever a witness claims
+   as `(priorSpent, priorNonce)`, it must reproduce the *current* on-chain
+   `spentCommitment` or the call fails. There is no separate code path for
+   "stale" versus "dishonest" to test independently.
 
 10. **Leak private policy through errors.**
     Expected: assertion failure messages name *which policy clause* failed
     but never the private values on either side of the comparison. Actual:
     every `assert` in `warden.compact` uses a fixed string literal (e.g.
     `"policy violation: amount exceeds mandate cap"`), never string
-    interpolation of a witness-derived value. Test:
-    `rejection messages never contain the private policy's raw values`.
+    interpolation of a witness-derived value. Test: `privacy — no leakage of
+    private policy through observable state > rejection messages never
+    contain the mandate's private cap value`.
 
 11. **Leak private policy through the frontend/SDK/API surface.**
     Expected: no code path serializes a `Policy` or a secret to anything
     that leaves the local process (network request, localStorage under a
-    guessable key, URL, log line). Test suite: the "Privacy" section of
-    `docs/../packages/contracts/src/test/warden.test.ts` plus an SDK-level
-    test asserting `JSON.stringify` of every public-facing SDK return value
-    never contains a tracked secret/policy byte sequence.
+    guessable key, URL, log line). What is actually tested today: the
+    "privacy" section of `packages/contracts/src/test/warden.test.ts`
+    (rejection messages, ledger contents, commitment unlinkability) and
+    `packages/sdk/src/client.test.ts`'s `never lets the agent's authorize
+    call see or return the private policy` (asserts `authorize()` resolves
+    `void` — there is no return value for a policy to leak through). A
+    stronger, exhaustive sweep — serializing every public-facing SDK/API
+    return value and asserting no tracked secret byte sequence appears in
+    it — is a named Wave 2 QA item, not yet implemented; stated here rather
+    than left implied.
 
 12. **Reuse cryptographic randomness (nonce reuse).**
     Expected: never — this is a design invariant, not something the circuit
@@ -127,8 +143,12 @@ theoretical security, it names the exact test that proves each line.
     Expected: rejected. Actual: `createMandate` and `revoke` both assert
     `pkOf(principalSecret(id)) == ctx.principalPk`; an attacker who knows
     only the public `id` (not the private context and secret) cannot pass
-    this. Test: `revoke by a non-principal caller fails`,
-    `createMandate cannot be front-run by a non-principal who observes the id`.
+    this. Tests: `createMandate > cannot be created by someone who holds
+    only the agent secret`, `revoke > cannot be called by a non-principal
+    (agent-only) caller`, and, at the SDK level with a genuinely separate
+    third-party identity rather than just a missing key,
+    `WardenClient — two-party flow > refuses a third party's attempt to
+    revoke someone else's mandate`.
 
 15. **Bypass policy by changing action parameters after proof generation.**
     Expected: structurally impossible, not merely rejected. Actual: the
