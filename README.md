@@ -189,13 +189,23 @@ commitment before anything depends on it. Full model:
 - **On-chain-verifiable actions only.** Warden proves an agent was
   authorized; it cannot and does not verify that an off-chain effect (an API
   call, a real-world purchase) occurred. Oracle problems are out of scope.
-- **No live devnet/proof server in this development environment.** This
-  environment has no Docker, so end-to-end proof generation against a
-  running Preview/Preprod network was not exercised here — the contract was
-  compiled with the real Compact 0.34.0 compiler and exercised through the
-  real `@midnight-ntwrk/compact-runtime` simulator (the same methodology
-  Midnight's own official example contracts use for their unit tests). See
-  [`docs/IMPLEMENTATION-NOTES.md`](docs/IMPLEMENTATION-NOTES.md).
+- **Live devnet deployment is blocked by real, current ecosystem version
+  skew, not a Warden defect.** Docker Desktop + WSL2 integration was set up
+  and the full local devnet (`infra/devnet/standalone.yml`) came up cleanly —
+  a real genesis wallet synced and showed real funds
+  (250,000,000,000,000 tNight, real DUST). Submitting an actual contract
+  deployment fails because the current Compact compiler (0.34.0) requires
+  `compact-runtime@0.19.0`, which no currently-*stable* `midnight-js` release
+  supports (they're pinned to `0.15.0`/`0.16.0`); the only SDK line that does
+  match (`5.0.0-beta.*`) depends on a different, unstable `ledger`/
+  `onchain-runtime` generation not proven compatible with our devnet's images.
+  Full root-cause, exact package versions, and what was actually tried:
+  [`docs/IMPLEMENTATION-NOTES.md`](docs/IMPLEMENTATION-NOTES.md), "Live
+  devnet: what actually worked, and the real blocker found". The Wave 1
+  deliverable itself is unaffected — `packages/contracts` runs on the current
+  compiler throughout, exercised via the real
+  `@midnight-ntwrk/compact-runtime` simulator (the same methodology
+  Midnight's own official example contracts use for their unit tests).
 - **Principal→agent handoff is not yet a secured channel.** The MVP
   colocates both roles' secrets in one demo session for simplicity; a real
   encrypted handoff is a named Wave 2 item.

@@ -12,3 +12,16 @@ npm-debug.log*
 # build artifacts, not source; keeping them out of git keeps the repo small
 # and avoids stale artifacts drifting from warden.compact.
 packages/contracts/src/managed/
+
+# Same reasoning for the live-devnet validation scripts under infra/devnet —
+# see docs/IMPLEMENTATION-NOTES.md, "Live devnet" section. The legacy variant
+# is compiled with an intentionally older compiler (0.31.1); regenerate via
+# `compact compile --directory ~/.compact src/warden.compact <out> +0.31.1`.
+infra/devnet/deploy-script-legacy/contract/src/managed/
+
+# Wallet/private-state storage the deploy scripts create when run (LevelDB
+# stores, transaction logs) — local, per-run state, never secrets meant to be
+# shared, but also never something to commit.
+infra/devnet/**/logs/
+infra/devnet/**/*.leveldb/
+infra/devnet/**/private-state-store*/

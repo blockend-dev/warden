@@ -1,0 +1,33 @@
+{
+  "name": "@warden/devnet-deploy-script-legacy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Experiment: is a live devnet deployment achievable today with the *stable* midnight-js line? warden.compact recompiled with an older Compact compiler (0.31.1) to match the compact-runtime version midnight-js@4.1.1's dependency chain actually ships with. Isolated from infra/devnet/deploy-script (which targets the current 0.34.0 compiler) specifically so it can pin a different, conflicting compact-runtime version. See docs/IMPLEMENTATION-NOTES.md.",
+  "scripts": {
+    "start": "node --experimental-strip-types src/deploy-and-call-legacy.ts"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime": "0.16.0",
+    "@midnight-ntwrk/ledger-v8": "8.1.0",
+    "@midnight-ntwrk/midnight-js": "4.1.1",
+    "@midnight-ntwrk/midnight-js-http-client-proof-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-protocol": "4.1.1",
+    "@midnight-ntwrk/wallet-sdk-address-format": "3.1.2",
+    "@midnight-ntwrk/wallet-sdk-dust-wallet": "4.1.0",
+    "@midnight-ntwrk/wallet-sdk-facade": "4.0.1",
+    "@midnight-ntwrk/wallet-sdk-hd": "3.0.2",
+    "@midnight-ntwrk/wallet-sdk-shielded": "3.0.1",
+    "@midnight-ntwrk/wallet-sdk-unshielded-wallet": "3.1.0",
+    "rxjs": "^7.8.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.6.2"
+  }
+}

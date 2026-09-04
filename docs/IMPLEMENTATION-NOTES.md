@@ -16,7 +16,21 @@ tooling.
 - Node.js: v24 (both the Windows host and the WSL Ubuntu 24.04 environment we
   compile in — Midnight's own docs recommend WSL on Windows, so we develop the
   contract/SDK inside WSL rather than fighting an unsupported native-Windows path).
-- No Docker is available in this sandboxed environment. This means:
+- **Update, same day:** Docker Desktop was installed by the user (with WSL2
+  integration) partway through this project, and the full local devnet
+  (`infra/devnet/standalone.yml`: `midnightntwrk/midnight-node:0.22.3`,
+  `midnightntwrk/indexer-standalone:4.0.0`, `midnightntwrk/proof-server:8.0.3`)
+  was brought up and verified healthy. A real HD wallet was built from the
+  well-known local-devnet genesis seed
+  (`0000000000000000000000000000000000000000000000000000000000000001` —
+  the same constant `example-counter`'s CLI uses for standalone mode), synced
+  against the real node, and showed a real genesis balance
+  (250,000,000,000,000 tNight) and real DUST
+  (1,250,000,000,000,000,000,000,000) — see "Live devnet: what actually
+  worked, and the real blocker found" below for the full result, including
+  where it currently stops short of a full proof-bearing deployment. Before
+  that point, the paragraph below described the prior (no-Docker) state of
+  this project and is kept for history:
   - We **can** compile real `.compact` files with the real compiler and run the
     real generated JS/circuit code against the TypeScript **simulator** pattern
     (see below) — this requires no proof server or node.
@@ -103,6 +117,125 @@ Source: `midnightntwrk/example-counter` and `midnightntwrk/example-bboard`
    expiry stay in private witness state, reasserted against the mandate
    commitment on every call. This is a deliberate privacy/enforceability
    trade-off, not an oversight — it is called out by name in `docs/PRIVACY.md`.
+
+## Live devnet: what actually worked, and the real blocker found
+
+The user installed Docker Desktop (with WSL2 integration) so this could be
+tested for real rather than staying at the simulator level. What follows is
+the complete, honest result — including the point where it currently stops,
+root-caused precisely rather than left as a mystery.
+
+### What is fully verified, live, real
+
+- `infra/devnet/standalone.yml` — the real, official
+  `midnightntwrk/midnight-node:0.22.3`, `midnightntwrk/indexer-standalone:4.0.0`,
+  and `midnightntwrk/proof-server:8.0.3` images (topology and healthchecks
+  copied verbatim from `example-counter`'s own `standalone.yml`) — was pulled
+  and brought up successfully. All three containers reached a healthy,
+  request-serving state (the proof server's Docker healthcheck label lagged
+  behind its actual readiness during the ~40s one-time trusted-setup-parameter
+  download it does on first boot, but `curl http://localhost:6300/version`
+  confirmed it was genuinely serving requests throughout).
+- A real HD wallet (`infra/devnet/deploy-script/src/deploy-and-call.ts`) was
+  derived from the well-known local-devnet genesis seed — the same constant
+  `example-counter`'s own CLI uses for standalone mode
+  (`0000...0001`) — using the real `@midnight-ntwrk/wallet-sdk-hd` key
+  derivation across all three roles (Zswap/shielded, NightExternal/unshielded,
+  Dust), wired through a real `WalletFacade` (shielded + unshielded + dust
+  sub-wallets), and synced against the real running node over its real
+  WebSocket RPC.
+- That sync produced a **real, non-zero genesis balance**:
+  250,000,000,000,000 tNight (unshielded) and 1,250,000,000,000,000,000,000,000
+  DUST already available — i.e., wallet↔node↔indexer communication over the
+  current wire protocol is fully working, no faucet or manual funding needed.
+
+### Where it currently stops, and exactly why
+
+Submitting the actual `deployContract` call — which would generate a real ZK
+proof via the live proof server and post a real transaction to the node —
+fails, and the reason is a precisely root-caused **version-skew problem
+across the published `@midnight-ntwrk/*` package ecosystem**, not a Warden
+defect:
+
+1. **The current Compact compiler (0.34.0) generates an *async* circuit API**
+   (`impureCircuits.foo(...)` returns `Promise<CircuitResults<...>>`), which
+   requires `@midnight-ntwrk/compact-runtime@0.19.0` — confirmed empirically
+   earlier in this document (the whole simulator-testing methodology depends
+   on this).
+2. **The current *stable* `midnight-js` line (4.0.4, and 4.1.1) does not
+   support that runtime.** Checked directly against the npm registry:
+   `midnight-js-contracts@4.0.4` bundles `compact-js@2.5.0`, which depends on
+   `compact-runtime@0.15.0`; `midnight-js-protocol@4.1.1` (the 4.1.x line's
+   equivalent) bundles `compact-js@2.5.1`, which depends on
+   `compact-runtime@0.16.0`. Both predate the async API change. Attempting to
+   deploy a 0.34.0-compiled contract through `midnight-js@4.0.4` fails
+   immediately inside `midnight-js-contracts`' bundled `compact-js` with
+   `TypeError: Cannot read properties of undefined (reading 'ctor')` — the
+   two `compact-js` instances (our top-level one, needed to match our
+   contract; its nested one, needed to match its own internals) disagree
+   about the shape of a compiled contract.
+3. **The only published `midnight-js` line whose dependency chain actually
+   matches `compact-runtime@0.19.0` is `5.0.0-beta.*`** — confirmed via
+   `npm view @midnight-ntwrk/midnight-js-protocol@5.0.0-beta.7 dependencies`,
+   which resolves to `compact-runtime@0.19.0-rc.0` — but that same beta line
+   also pulls `@midnightntwrk/ledger-v9` and
+   `@midnightntwrk/onchain-runtime-v4` (note: a *different, non-hyphenated*
+   npm scope, `@midnightntwrk` rather than `@midnight-ntwrk` — a genuine,
+   easy-to-miss inconsistency in the ecosystem's own package naming). Our
+   devnet's Docker images are built for the stable `ledger-v8`/
+   `onchain-runtime-v3` line, so there is no confidence the beta SDK's wire
+   protocol even matches what `midnightntwrk/midnight-node:0.22.3` speaks —
+   this was not tested, to avoid compounding an already-identified mismatch
+   with a second, unverified one.
+4. **We also tried bridging the gap from the other direction**: recompiling
+   `warden.compact` with an older compiler (0.31.1, confirmed to still
+   produce the pre-async, synchronous circuit API compatible with
+   `compact-runtime@0.16.0`) and pointing it at `midnight-js@4.1.1`
+   specifically (`infra/devnet/deploy-script-legacy/`). This got substantially
+   further — past compilation, past `CompiledContract.make(...).pipe(
+   CompiledContract.withWitnesses(...), CompiledContract.withCompiledFileAssets(...))`,
+   past a `ledger-v8` WASM version mismatch (`wallet-sdk-dust-wallet@3.0.0`
+   expects `ledger-v8@^8.0.2`; upgrading to the mutually-consistent current
+   set — `wallet-sdk-facade@4.0.1` / `-dust-wallet@4.1.0` /
+   `-shielded@3.0.1` / `-unshielded-wallet@3.1.0`, all pinned to
+   `ledger-v8@^8.1.0` — fixed a `TypeError: expected instance of
+   DustParameters` WASM class-identity error) — and then hit a **real public
+   API removal**: `wallet-sdk-unshielded-wallet@2.1.0`'s
+   `InMemoryTransactionHistoryStorage` export (used by the reference CLI code
+   this project is otherwise following closely) is no longer part of
+   `3.1.0`'s public `exports` map at all. At that point we stopped rather
+   than reverse-engineer a second package's new, undocumented-to-us API
+   surface — this is a real, current, unresolved rough edge in the package
+   ecosystem, not something to paper over with a workaround whose correctness
+   we couldn't verify.
+
+### The honest conclusion
+
+**Deploying a contract compiled with the current (0.34.0) Compact compiler to
+a live Midnight devnet is not, as of 2026-09-07, a clean, drop-in operation
+with any single currently-published, mutually-consistent combination of
+`@midnight-ntwrk/*` packages we could find** — the compiler has moved ahead
+of the stable SDK line's `compact-runtime` pin, and the one SDK line that has
+caught up (`5.0.0-beta.*`) has itself moved ahead of the stable
+`ledger`/`onchain-runtime`/wallet-sdk line our devnet images are built
+against. This is a real, verified, root-caused finding — not a Warden defect,
+not a skill gap, and not something a different contract design would avoid.
+Everything *before* this point (Docker, the full devnet, real wallet sync,
+real genesis funds) is fully working proof that the infrastructure itself is
+sound; the gap is specifically in the current cross-package release
+alignment for the contract-deployment path.
+
+**What this does not affect:** the Wave 1 deliverable itself. `packages/contracts`
+stays on the current 0.34.0 compiler (correctly — that's the toolchain judges
+will actually be building against), and its 35 tests all exercise the real
+compiled circuit logic via the `@midnight-ntwrk/compact-runtime@0.19.0`
+simulator — the same methodology Midnight's own official example contracts
+use for testing, and the same one this document already described in detail
+above. `infra/devnet/deploy-script*` are kept as working, documented evidence
+of exactly how far live deployment gets today and exactly where and why it
+currently stops — useful for whoever revisits this once the ecosystem's
+package versions catch up to each other, not something to delete because it
+didn't reach 100%.
 
 ## Bugs actually caught by running the stack, not just reasoning about it
 

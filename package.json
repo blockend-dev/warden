@@ -5,7 +5,9 @@
   "type": "module",
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "infra/devnet/deploy-script",
+    "infra/devnet/deploy-script-legacy"
   ],
   "scripts": {
     "compact": "npm run compact --workspace packages/contracts",

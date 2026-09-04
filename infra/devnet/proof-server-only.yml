@@ -1,0 +1,15 @@
+# Just the proof server, no node/indexer — for compiling/proving circuits
+# locally without a full devnet. Verbatim from `example-counter`'s
+# `counter-cli/proof-server.yml`. Useful as the first, fastest smoke test
+# that Docker + the Midnight images work at all in a given environment.
+#
+# Usage: docker compose -f infra/devnet/proof-server-only.yml up
+services:
+  proof-server:
+    container_name: 'warden-proof-server-only'
+    image: 'midnightntwrk/proof-server:8.0.3'
+    command: ['midnight-proof-server -v']
+    ports:
+      - '6300:6300'
+    environment:
+      RUST_BACKTRACE: 'full'
