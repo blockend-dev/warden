@@ -70,12 +70,11 @@ witness freshNonce(id: Bytes<32>): Bytes<32>;
 
 // -- Pure helpers (no ledger access, no witness calls) -----------------------
 
-// Exported (not just `pure`) alongside `mandateId` and `spendCommitment`
-// below so the SDK can derive key-commitments and spend commitments
-// client-side using the exact same, compiler-verified implementation the
-// circuits check against — never a hand-reimplemented hash that could
-// silently drift from it.
-export circuit pkOf(secret: Bytes<32>): Bytes<32> {
+// `pkOf`, `mandateId`, and `spendCommitment` are exported pure circuits so
+// the SDK can derive key-commitments and spend commitments client-side using
+// the exact same, compiler-verified implementation the circuits below check
+// against — never a hand-reimplemented hash that could silently drift from it.
+export pure circuit pkOf(secret: Bytes<32>): Bytes<32> {
   return persistentHash<Vector<2, Bytes<32>>>([pad(32, "warden:pk:"), secret]);
 }
 
@@ -93,9 +92,8 @@ pure circuit policyHash(policy: Policy): Bytes<32> {
 }
 
 // The mandate id: a domain-separated commitment binding the principal, the
-// agent, and every policy clause together. Exported (not just `pure`) so the
-// SDK can compute it client-side before a mandate is ever created on-chain.
-export circuit mandateId(ctx: MandateContext): Bytes<32> {
+// agent, and every policy clause together.
+export pure circuit mandateId(ctx: MandateContext): Bytes<32> {
   return persistentHash<Vector<4, Bytes<32>>>([
     pad(32, "warden:mandate:"),
     ctx.principalPk,
@@ -108,7 +106,7 @@ export circuit mandateId(ctx: MandateContext): Bytes<32> {
 // on every update so consecutive on-chain values are unlinkable — an observer
 // sees that *a* mandate's spend state changed, never by how much, and never
 // the mandate's cap. See docs/PRIVACY.md, "spend commitment chaining".
-export circuit spendCommitment(total: Uint<64>, nonce: Bytes<32>): Bytes<32> {
+export pure circuit spendCommitment(total: Uint<64>, nonce: Bytes<32>): Bytes<32> {
   return persistentHash<Vector<3, Bytes<32>>>([
     pad(32, "warden:spent:"),
     total as Field as Bytes<32>,
