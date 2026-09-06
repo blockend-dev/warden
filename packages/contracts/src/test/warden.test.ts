@@ -153,11 +153,22 @@ describe("authorize — policy boundaries", () => {
     expect(ledger.actionCount.lookup(id).read()).toBe(1n);
   });
 
+  it("authorizes a zero-amount action and still consumes an action-count slot", async () => {
+    const ledger = await sim.authorize(id, 0n, category(ASSET), category(ACTION), category(DEST), NOW);
+    expect(ledger.actionCount.lookup(id).read()).toBe(1n);
+  });
+
   it("authorizes an amount landing exactly on the cap, then rejects the next unit", async () => {
     await sim.authorize(id, 500n, category(ASSET), category(ACTION), category(DEST), NOW);
     await expect(
       sim.authorize(id, 1n, category(ASSET), category(ACTION), category(DEST), NOW)
     ).rejects.toThrow(/exceeds mandate cap/);
+  });
+
+  it("allows a zero-amount action even once the cap is fully spent", async () => {
+    await sim.authorize(id, 500n, category(ASSET), category(ACTION), category(DEST), NOW);
+    const ledger = await sim.authorize(id, 0n, category(ASSET), category(ACTION), category(DEST), NOW);
+    expect(ledger.actionCount.lookup(id).read()).toBe(2n);
   });
 
   it("rejects a cumulative amount that would exceed the cap", async () => {
@@ -272,6 +283,42 @@ describe("authorize — authorization and impersonation", () => {
     ).rejects.toThrow(/stale or forged spend state/);
   });
 
+  it("fails when mandate B's authorize is attempted with mandate A's real spend state", async () => {
+    const sim = await WardenSimulator.create();
+    const a = buildMandate(1, 2, BASE_POLICY);
+    const b = buildMandate(3, 4, BASE_POLICY);
+    sim.seedMandate(a.id, a.record);
+    sim.seedMandate(b.id, b.record);
+    await sim.createMandate(a.id, NOW);
+    await sim.createMandate(b.id, NOW);
+    await sim.authorize(a.id, 200n, category(ASSET), category(ACTION), category(DEST), NOW);
+
+    const aRecord = sim.getPrivateState().mandates[Buffer.from(a.id).toString("hex")];
+    sim.seedMandate(b.id, { ...b.record, spentTotal: aRecord.spentTotal, spentNonce: aRecord.spentNonce });
+
+    await expect(
+      sim.authorize(b.id, 1n, category(ASSET), category(ACTION), category(DEST), NOW)
+    ).rejects.toThrow(/stale or forged spend state/);
+  });
+
+  it("a second authorize built from the same pre-state as an already-landed one fails, rather than double-spending", async () => {
+    const sim = await WardenSimulator.create();
+    const { id, record } = buildMandate(1, 2, { ...BASE_POLICY, maxAmount: 300n });
+    sim.seedMandate(id, record);
+    await sim.createMandate(id, NOW);
+
+    const preRaceState = sim.getPrivateState().mandates[Buffer.from(id).toString("hex")];
+    await sim.authorize(id, 300n, category(ASSET), category(ACTION), category(DEST), NOW);
+
+    // A second call whose witness data reflects the state *before* the first
+    // call landed — as if it were proven concurrently against the same
+    // starting point. It must be evaluated against the real, now-advanced
+    // on-chain commitment, not the stale one it was built from.
+    sim.seedMandate(id, preRaceState);
+    await expect(
+      sim.authorize(id, 300n, category(ASSET), category(ACTION), category(DEST), NOW)
+    ).rejects.toThrow(/stale or forged spend state/);
+  });
 });
 
 describe("revoke", () => {
@@ -316,6 +363,18 @@ describe("revoke", () => {
 
     sim.seedMandate(id, { ...record, principalSecret: undefined });
     await expect(sim.revoke(id, NOW)).rejects.toThrow(/principal secret/);
+  });
+
+  it("a revoked mandate cannot be authorized even before its expiry", async () => {
+    const sim = await WardenSimulator.create();
+    const { id, record } = buildMandate(1, 2, BASE_POLICY);
+    sim.seedMandate(id, record);
+    await sim.createMandate(id, NOW);
+    await sim.revoke(id, NOW);
+
+    await expect(
+      sim.authorize(id, 1n, category(ASSET), category(ACTION), category(DEST), NOW)
+    ).rejects.toThrow(/mandate revoked/);
   });
 });
 
