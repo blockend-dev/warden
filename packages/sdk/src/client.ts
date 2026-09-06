@@ -167,15 +167,25 @@ export class WardenClient {
     }
   }
 
-  /** Safe for anyone to call: reads only public ledger state. */
+  /** Reads public ledger state (safe for anyone to call), plus this
+   * session's own locally-held mandate context if it has one, to also
+   * report `"expired"`. `expiry` is disclosed only as a transaction
+   * argument on `createMandate`/`authorize` (see `warden.compact`), not
+   * persisted anywhere in ledger state itself — a caller with no local
+   * record of the mandate (a third party that was never handed its context)
+   * cannot distinguish "active" from "expired" from public state alone, and
+   * `status()` correctly reports "active" for them either way rather than
+   * guessing. */
   async status(id: Uint8Array): Promise<MandateSummary> {
     const net = await this.network;
     const ledger = net.getLedger();
     const registered = ledger.registered.member(id);
     const revoked = ledger.revoked.member(id);
+    const record = this.privateState.mandates[idHex(id)];
+    const expired = record !== undefined && BigInt(Math.floor(Date.now() / 1000)) > record.context.policy.expiry;
     return {
       id: idHex(id),
-      status: !registered ? "unknown" : revoked ? "revoked" : "active",
+      status: !registered ? "unknown" : revoked ? "revoked" : expired ? "expired" : "active",
       actionsAuthorized: registered ? Number(ledger.actionCount.lookup(id).read()) : 0
     };
   }

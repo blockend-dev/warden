@@ -3,7 +3,7 @@
 // shared `LocalSimulatorNetwork` — proving the principal/agent split works
 // through the public API, not just inside `packages/contracts`' own tests.
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createWarden, type WardenClient } from "./client.js";
 import { LocalSimulatorNetwork } from "./network.js";
 import { PolicyViolationError, MandateRevokedError, MandateExpiredError, NotAuthorizedError } from "./errors.js";
@@ -57,6 +57,21 @@ describe("WardenClient — two-party flow", () => {
     await expect(agent.authorize(handoff.id, ACTION)).rejects.toBeInstanceOf(MandateRevokedError);
     const status = await principal.status(handoff.id);
     expect(status.status).toBe("revoked");
+  });
+
+  it("status() reports \"expired\" once its own known policy's expiry has passed", async () => {
+    const shortLived = { ...POLICY, expiry: BigInt(Math.floor(Date.now() / 1000) + 60) };
+    const handoff = await principal.createMandate({ agentPublicKey: agent.publicKey, policy: shortLived });
+
+    expect((await principal.status(handoff.id)).status).toBe("active");
+
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 120_000);
+    try {
+      expect((await principal.status(handoff.id)).status).toBe("expired");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses to create a mandate whose expiry has already passed", async () => {
