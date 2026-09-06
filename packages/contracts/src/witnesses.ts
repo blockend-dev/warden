@@ -28,11 +28,13 @@ export type MandateRecord = {
   /** The nonce behind the *currently on-chain* spend commitment. */
   readonly spentNonce: Uint8Array;
   /**
-   * Set by the `freshNonce` witness while an `authorize` call is in flight,
-   * cleared once the SDK confirms the call landed. Never read by any circuit
-   * assertion directly — it exists only so the SDK can learn, after the
-   * fact, which nonce the circuit actually used, and fold it into
-   * `spentNonce`. See `packages/sdk/src/mandate.ts`, `finalizeAuthorize`.
+   * Set by the `freshNonce` witness while an `authorize` or `createMandate`
+   * call is in flight, cleared once the caller confirms the call landed.
+   * Never read by any circuit assertion directly — it exists only so callers
+   * can learn, after the fact, which nonce the circuit actually used, and
+   * fold it into `spentNonce`. See `packages/sdk/src/client.ts`,
+   * `finalizeAfterCall`, and `packages/contracts/src/test/warden-simulator.ts`,
+   * `confirmNonce`.
    */
   readonly pendingNonce?: Uint8Array;
 };

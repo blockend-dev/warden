@@ -136,9 +136,10 @@ export class WardenClient {
 
   /** Agent only. Throws a typed `WardenError` (see `errors.ts`) rather than
    * resolving falsy — callers should treat any rejection as "blocked", not
-   * inspect a boolean. */
-  async authorize(id: Uint8Array, action: ActionRequest, now?: bigint): Promise<void> {
-    const currentTime = now ?? BigInt(Math.floor(Date.now() / 1000));
+   * inspect a boolean. Expiry is checked by the circuit itself against the
+   * ledger's own block time (`blockTimeLte` — see `warden.compact`), not a
+   * value this SDK supplies, so there is nothing to pass or forge here. */
+  async authorize(id: Uint8Array, action: ActionRequest): Promise<void> {
     try {
       const net = await this.network;
       const result = await net.authorize(
@@ -147,8 +148,7 @@ export class WardenClient {
         action.amount,
         encodeCategory(action.asset),
         encodeCategory(action.actionType),
-        encodeCategory(action.destinationCategory),
-        currentTime
+        encodeCategory(action.destinationCategory)
       );
       this.privateState = finalizeAfterCall(result.privateState, id, action.amount);
     } catch (cause) {

@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createWarden, type WardenClient } from "./client.js";
 import { LocalSimulatorNetwork } from "./network.js";
-import { PolicyViolationError, MandateRevokedError, NotAuthorizedError } from "./errors.js";
+import { PolicyViolationError, MandateRevokedError, MandateExpiredError, NotAuthorizedError } from "./errors.js";
 
 const POLICY = {
   maxAmount: 500n,
@@ -57,6 +57,13 @@ describe("WardenClient — two-party flow", () => {
     await expect(agent.authorize(handoff.id, ACTION)).rejects.toBeInstanceOf(MandateRevokedError);
     const status = await principal.status(handoff.id);
     expect(status.status).toBe("revoked");
+  });
+
+  it("refuses to create a mandate whose expiry has already passed", async () => {
+    const pastExpiry = { ...POLICY, expiry: BigInt(Math.floor(Date.now() / 1000) - 10) };
+    await expect(
+      principal.createMandate({ agentPublicKey: agent.publicKey, policy: pastExpiry })
+    ).rejects.toBeInstanceOf(MandateExpiredError);
   });
 
   it("refuses a third party's attempt to revoke someone else's mandate", async () => {

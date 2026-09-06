@@ -17,9 +17,13 @@ pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 
-// The mandate's terms. Entirely private: it never touches the ledger, and no
-// exported circuit returns it. Only `mandateId(...)`, a one-way commitment to
-// it, is ever public.
+// The mandate's terms. Never touches the ledger and no exported circuit
+// returns the struct itself — only `mandateId(...)`, a one-way commitment to
+// it, is public by default. `expiry` is the one field that is additionally
+// disclosed on its own: enforcing it against real time requires the standard
+// library's `blockTimeLte`, whose argument the compiler requires to be
+// public (see `createMandate` and `authorize`, and docs/PRIVACY.md). Every
+// other field stays private.
 struct Policy {
   maxAmount: Uint<64>;
   asset: Bytes<32>;
@@ -126,7 +130,7 @@ export circuit createMandate(id: Bytes<32>): [] {
   assert(mandateId(ctx) == pid, "mandate context does not match its public id");
   assert(pkOf(principalSecret(pid)) == ctx.principalPk, "caller is not the principal for this mandate");
   assert(ctx.policy.actionCountLimit > 0, "action count limit must be positive");
-  assert(ctx.policy.expiry > 0, "expiry must be set");
+  assert(blockTimeLte(disclose(ctx.policy.expiry)), "expiry must be in the future");
 
   registered.insert(pid);
   actionCount.insert(pid, default<Counter>);
@@ -147,8 +151,7 @@ export circuit authorize(
   requestedAmount: Uint<64>,
   requestedAsset: Bytes<32>,
   requestedActionType: Bytes<32>,
-  requestedDestinationCategory: Bytes<32>,
-  currentTime: Uint<64>
+  requestedDestinationCategory: Bytes<32>
 ): [] {
   const pid = disclose(id);
   assert(registered.member(pid), "unknown mandate");
@@ -158,7 +161,7 @@ export circuit authorize(
   assert(mandateId(ctx) == pid, "mandate context does not match its public id");
   assert(pkOf(agentSecret(pid)) == ctx.agentPk, "caller is not the authorized agent for this mandate");
 
-  assert(currentTime <= ctx.policy.expiry, "mandate expired");
+  assert(blockTimeLte(disclose(ctx.policy.expiry)), "mandate expired");
   assert(requestedAsset == ctx.policy.asset, "asset not permitted by mandate");
   assert(requestedActionType == ctx.policy.actionType, "action type not permitted by mandate");
   assert(requestedDestinationCategory == ctx.policy.destinationCategory, "destination not permitted by mandate");

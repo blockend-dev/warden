@@ -6,13 +6,17 @@
 // this file's construction was empirically verified against before being
 // written this way).
 //
-// No Docker, no proof server, no network: `contract.impureCircuits.*` runs
-// the real compiled circuit logic (including every `assert`) in-process.
-// A rejected call throws — callers should expect that and catch it, exactly
-// as the deployed contract will reject an invalid transaction.
+// A fresh `CircuitContext` is built for every call rather than threaded
+// forward, so tests can pin `atTime` deterministically — `authorize` and
+// `createMandate` both assert against `blockTimeLte`, which reads whatever
+// time the context was built with (verified empirically; see
+// docs/IMPLEMENTATION-NOTES.md). No Docker, no proof server, no network:
+// `contract.impureCircuits.*` runs the real compiled circuit logic
+// (including every `assert`) in-process. A rejected call throws — callers
+// should expect that and catch it, exactly as the deployed contract will
+// reject an invalid transaction.
 
 import {
-  type CircuitContext,
   createCircuitContext,
   createConstructorContext,
   sampleContractAddress
@@ -22,61 +26,95 @@ import {
   emptyWardenPrivateState,
   witnesses,
   withMandate,
+  idHex,
   type MandateRecord,
   type WardenPrivateState
 } from "../witnesses.js";
 
 export class WardenSimulator {
   readonly contract: Contract<WardenPrivateState>;
-  circuitContext!: CircuitContext<WardenPrivateState>;
+  private readonly address: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- opaque runtime state from @midnight-ntwrk/compact-runtime
+  private publicState: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private zswapState: any;
+  private privateState: WardenPrivateState;
 
-  private constructor() {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private constructor(address: string, publicState: any, zswapState: any, privateState: WardenPrivateState) {
     this.contract = new Contract<WardenPrivateState>(witnesses);
+    this.address = address;
+    this.publicState = publicState;
+    this.zswapState = zswapState;
+    this.privateState = privateState;
   }
 
   static async create(privateState: WardenPrivateState = emptyWardenPrivateState()): Promise<WardenSimulator> {
-    const sim = new WardenSimulator();
-    const ctor = await sim.contract.initialState(createConstructorContext(privateState, "0".repeat(64)));
-    sim.circuitContext = createCircuitContext(
-      "createMandate",
+    const bootstrap = new Contract<WardenPrivateState>(witnesses);
+    const ctor = await bootstrap.initialState(createConstructorContext(privateState, "0".repeat(64)));
+    return new WardenSimulator(
       sampleContractAddress(),
-      ctor.currentZswapLocalState,
       ctor.currentContractState,
+      ctor.currentZswapLocalState,
       ctor.currentPrivateState
     );
-    return sim;
   }
 
   getLedger(): Ledger {
-    return ledger(this.circuitContext.callContext.currentQueryContext.state);
+    return ledger(this.publicState);
   }
 
   getPrivateState(): WardenPrivateState {
-    return this.circuitContext.callContext.currentPrivateState as WardenPrivateState;
+    return this.privateState;
   }
 
   /** Seeds a mandate record into local private state without touching the ledger. */
   seedMandate(id: Uint8Array, record: MandateRecord): void {
-    const nextPs = withMandate(this.getPrivateState(), id, record);
-    this.circuitContext = {
-      ...this.circuitContext,
-      callContext: { ...this.circuitContext.callContext, currentPrivateState: nextPs }
-    };
+    this.privateState = withMandate(this.privateState, id, record);
   }
 
-  async createMandate(id: Uint8Array): Promise<Ledger> {
-    const res = await this.contract.impureCircuits.createMandate(this.circuitContext, id);
-    this.circuitContext = res.context;
+  private buildContext(circuitId: string, atTime?: bigint) {
+    return createCircuitContext(
+      circuitId,
+      this.address,
+      this.zswapState,
+      this.publicState,
+      this.privateState,
+      undefined,
+      undefined,
+      undefined,
+      atTime === undefined ? undefined : Number(atTime)
+    );
+  }
 
-    // Same fold as `authorize`: `createMandate` also draws a fresh nonce (for
-    // the mandate's initial spend commitment, total = 0) via the `freshNonce`
-    // witness. Confirm it into `spentNonce` now that the call has succeeded.
-    const ps = this.getPrivateState();
-    const key = Buffer.from(id).toString("hex");
-    const rec = ps.mandates[key];
-    if (rec?.pendingNonce) {
-      this.seedMandate(id, { ...rec, spentTotal: 0n, spentNonce: rec.pendingNonce, pendingNonce: undefined });
-    }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private commit(context: any): void {
+    this.publicState = context.callContext.currentQueryContext.state;
+    this.zswapState = context.callContext.currentZswapLocalState ?? this.zswapState;
+    this.privateState = context.callContext.currentPrivateState as WardenPrivateState;
+  }
+
+  /** Folds the pending spend-commitment nonce a `freshNonce` witness call
+   * stashed during a just-succeeded call into confirmed state. Mirrors what
+   * `packages/sdk`'s `WardenClient` does after a real network call confirms
+   * — see `packages/sdk/src/client.ts`, `finalizeAfterCall`. */
+  private confirmNonce(id: Uint8Array, amountJustSpent: bigint): void {
+    const rec = this.privateState.mandates[idHex(id)];
+    if (!rec?.pendingNonce) return;
+    this.privateState = withMandate(this.privateState, id, {
+      ...rec,
+      spentTotal: rec.spentTotal + amountJustSpent,
+      spentNonce: rec.pendingNonce,
+      pendingNonce: undefined
+    });
+  }
+
+  /** `atTime`, in Unix seconds, is what `blockTimeLte` inside the circuit
+   * sees as "now" — omit it to use the simulator's real wall-clock default. */
+  async createMandate(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
+    const res = await this.contract.impureCircuits.createMandate(this.buildContext("createMandate", atTime), id);
+    this.commit(res.context);
+    this.confirmNonce(id, 0n);
     return this.getLedger();
   }
 
@@ -86,40 +124,24 @@ export class WardenSimulator {
     requestedAsset: Uint8Array,
     requestedActionType: Uint8Array,
     requestedDestinationCategory: Uint8Array,
-    currentTime: bigint
+    atTime?: bigint
   ): Promise<Ledger> {
     const res = await this.contract.impureCircuits.authorize(
-      this.circuitContext,
+      this.buildContext("authorize", atTime),
       id,
       requestedAmount,
       requestedAsset,
       requestedActionType,
-      requestedDestinationCategory,
-      currentTime
+      requestedDestinationCategory
     );
-    this.circuitContext = res.context;
-
-    // Fold the pending spend-commitment nonce the `freshNonce` witness
-    // stashed during this call into confirmed state, now that we know the
-    // call actually succeeded. Mirrors what `packages/sdk` does after a real
-    // network submission confirms. See `docs/ARCHITECTURE.md` §5.
-    const ps = this.getPrivateState();
-    const key = Buffer.from(id).toString("hex");
-    const rec = ps.mandates[key];
-    if (rec?.pendingNonce) {
-      this.seedMandate(id, {
-        ...rec,
-        spentTotal: rec.spentTotal + requestedAmount,
-        spentNonce: rec.pendingNonce,
-        pendingNonce: undefined
-      });
-    }
+    this.commit(res.context);
+    this.confirmNonce(id, requestedAmount);
     return this.getLedger();
   }
 
-  async revoke(id: Uint8Array): Promise<Ledger> {
-    const res = await this.contract.impureCircuits.revoke(this.circuitContext, id);
-    this.circuitContext = res.context;
+  async revoke(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
+    const res = await this.contract.impureCircuits.revoke(this.buildContext("revoke", atTime), id);
+    this.commit(res.context);
     return this.getLedger();
   }
 }

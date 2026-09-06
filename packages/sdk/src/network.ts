@@ -23,8 +23,7 @@ export interface WardenBackend {
     requestedAmount: bigint,
     requestedAsset: Uint8Array,
     requestedActionType: Uint8Array,
-    requestedDestinationCategory: Uint8Array,
-    currentTime: bigint
+    requestedDestinationCategory: Uint8Array
   ): Promise<CallResult>;
   revoke(privateState: WardenPrivateState, id: Uint8Array): Promise<CallResult>;
 }
@@ -37,9 +36,12 @@ export interface WardenBackend {
  * executes for real; nothing here is a mock of the protocol's logic.
  *
  * What it is *not* a substitute for: real proof generation against a live
- * proof server, and real submission to a Preview/Preprod network — those
- * require Docker, which this development environment does not have (see
- * docs/IMPLEMENTATION-NOTES.md). `WardenBackend` exists specifically so that
+ * proof server, and real submission to a devnet/Preview/Preprod network. A
+ * live devnet was reached separately (`infra/devnet/`) but contract
+ * deployment there is currently blocked by a published-package version
+ * mismatch between the current Compact compiler and the stable `midnight-js`
+ * SDK line, not by anything in this codebase — see
+ * docs/IMPLEMENTATION-NOTES.md. `WardenBackend` exists specifically so that
  * gap is a swappable implementation, not a load-bearing assumption baked
  * into the client.
  *
@@ -87,8 +89,7 @@ export class LocalSimulatorNetwork implements WardenBackend {
     requestedAmount: bigint,
     requestedAsset: Uint8Array,
     requestedActionType: Uint8Array,
-    requestedDestinationCategory: Uint8Array,
-    currentTime: bigint
+    requestedDestinationCategory: Uint8Array
   ): Promise<CallResult> {
     const contract = new Contract<WardenPrivateState>(witnesses);
     const ctx = createCircuitContext("authorize", this.address, this.zswap, this.state, privateState);
@@ -98,8 +99,7 @@ export class LocalSimulatorNetwork implements WardenBackend {
       requestedAmount,
       requestedAsset,
       requestedActionType,
-      requestedDestinationCategory,
-      currentTime
+      requestedDestinationCategory
     );
     return this.commit(res.context);
   }

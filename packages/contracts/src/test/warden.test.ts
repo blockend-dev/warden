@@ -11,13 +11,19 @@ import { buildMandate, category, randomBytes32 } from "./fixtures.js";
 const ASSET = "DEMO";
 const ACTION = "payment";
 const DEST = "vendor:approved";
-const NOW = 1_000_000n;
+
+// A fixed reference instant, not wall-clock time: every expiry-adjacent test
+// pins the simulator's block time explicitly (via `atTime`) rather than
+// relying on `Date.now()`, so boundary cases are deterministic.
+const EPOCH = 1_700_000_000n;
+const NOW = EPOCH;
+
 const BASE_POLICY = {
   maxAmount: 500n,
   asset: ASSET,
   actionType: ACTION,
   destinationCategory: DEST,
-  expiry: NOW + 3_600n,
+  expiry: EPOCH + 3_600n,
   actionCountLimit: 5n
 };
 
@@ -27,7 +33,7 @@ describe("createMandate", () => {
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
 
-    const ledger = await sim.createMandate(id);
+    const ledger = await sim.createMandate(id, NOW);
 
     expect(ledger.registered.member(id)).toBe(true);
     expect(ledger.revoked.member(id)).toBe(false);
@@ -40,16 +46,16 @@ describe("createMandate", () => {
     const wrongId = randomBytes32(9);
     sim.seedMandate(wrongId, record);
 
-    await expect(sim.createMandate(wrongId)).rejects.toThrow(/does not match its public id/);
+    await expect(sim.createMandate(wrongId, NOW)).rejects.toThrow(/does not match its public id/);
   });
 
   it("cannot be registered twice", async () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
 
-    await expect(sim.createMandate(id)).rejects.toThrow(/already exists/);
+    await expect(sim.createMandate(id, NOW)).rejects.toThrow(/already exists/);
   });
 
   it("cannot be created by someone who holds only the agent secret", async () => {
@@ -57,7 +63,7 @@ describe("createMandate", () => {
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, { ...record, principalSecret: undefined });
 
-    await expect(sim.createMandate(id)).rejects.toThrow(/principal secret/);
+    await expect(sim.createMandate(id, NOW)).rejects.toThrow(/principal secret/);
   });
 
   it("rejects a zero action-count limit", async () => {
@@ -65,7 +71,68 @@ describe("createMandate", () => {
     const { id, record } = buildMandate(1, 2, { ...BASE_POLICY, actionCountLimit: 0n });
     sim.seedMandate(id, record);
 
-    await expect(sim.createMandate(id)).rejects.toThrow(/action count limit must be positive/);
+    await expect(sim.createMandate(id, NOW)).rejects.toThrow(/action count limit must be positive/);
+  });
+
+  it("rejects an expiry that has already passed", async () => {
+    const sim = await WardenSimulator.create();
+    const { id, record } = buildMandate(1, 2, { ...BASE_POLICY, expiry: EPOCH - 1n });
+    sim.seedMandate(id, record);
+
+    await expect(sim.createMandate(id, NOW)).rejects.toThrow(/expiry must be in the future/);
+  });
+
+  it("accepts an expiry exactly at the current block time", async () => {
+    const sim = await WardenSimulator.create();
+    const { id, record } = buildMandate(1, 2, { ...BASE_POLICY, expiry: EPOCH });
+    sim.seedMandate(id, record);
+
+    const ledger = await sim.createMandate(id, EPOCH);
+    expect(ledger.registered.member(id)).toBe(true);
+  });
+});
+
+describe("authorize — block-time expiry enforcement", () => {
+  // This block exists because of a real vulnerability found during audit:
+  // `authorize` used to take `currentTime` as a plain circuit argument
+  // supplied by the caller, so an agent could pass any value ≤ the (private)
+  // expiry regardless of the real time and the expiry check was
+  // unenforceable. The fix removed the argument entirely and switched to the
+  // standard library's `blockTimeLte`, which reads the ledger's own block
+  // time — there is no longer a "current time" value for a caller to lie
+  // about. See docs/IMPLEMENTATION-NOTES.md.
+
+  let sim: WardenSimulator;
+  let id: Uint8Array;
+
+  beforeEach(async () => {
+    sim = await WardenSimulator.create();
+    const built = buildMandate(1, 2, BASE_POLICY);
+    id = built.id;
+    sim.seedMandate(id, built.record);
+    await sim.createMandate(id, NOW);
+  });
+
+  it("authorizes before expiry", async () => {
+    const ledger = await sim.authorize(id, 100n, category(ASSET), category(ACTION), category(DEST), BASE_POLICY.expiry - 1n);
+    expect(ledger.actionCount.lookup(id).read()).toBe(1n);
+  });
+
+  it("authorizes exactly at the expiry instant", async () => {
+    const ledger = await sim.authorize(id, 100n, category(ASSET), category(ACTION), category(DEST), BASE_POLICY.expiry);
+    expect(ledger.actionCount.lookup(id).read()).toBe(1n);
+  });
+
+  it("rejects one instant past expiry", async () => {
+    await expect(
+      sim.authorize(id, 100n, category(ASSET), category(ACTION), category(DEST), BASE_POLICY.expiry + 1n)
+    ).rejects.toThrow(/mandate expired/);
+  });
+
+  it("rejects well past expiry", async () => {
+    await expect(
+      sim.authorize(id, 100n, category(ASSET), category(ACTION), category(DEST), BASE_POLICY.expiry + 1_000_000n)
+    ).rejects.toThrow(/mandate expired/);
   });
 });
 
@@ -78,7 +145,7 @@ describe("authorize — policy boundaries", () => {
     const built = buildMandate(1, 2, BASE_POLICY);
     id = built.id;
     sim.seedMandate(id, built.record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
   });
 
   it("authorizes an amount within cap", async () => {
@@ -118,12 +185,6 @@ describe("authorize — policy boundaries", () => {
     ).rejects.toThrow(/destination not permitted/);
   });
 
-  it("rejects an expired mandate", async () => {
-    await expect(
-      sim.authorize(id, 10n, category(ASSET), category(ACTION), category(DEST), NOW + 999_999n)
-    ).rejects.toThrow(/expired/);
-  });
-
   it("enforces the action-count limit", async () => {
     for (let i = 0; i < 5; i++) {
       await sim.authorize(id, 1n, category(ASSET), category(ACTION), category(DEST), NOW);
@@ -137,7 +198,6 @@ describe("authorize — policy boundaries", () => {
     await sim.authorize(id, 200n, category(ASSET), category(ACTION), category(DEST), NOW);
     const ledger = await sim.authorize(id, 200n, category(ASSET), category(ACTION), category(DEST), NOW);
     expect(ledger.actionCount.lookup(id).read()).toBe(2n);
-    // A third identical call would be the 401st..600th unit and must fail.
     await expect(
       sim.authorize(id, 200n, category(ASSET), category(ACTION), category(DEST), NOW)
     ).rejects.toThrow(/exceeds mandate cap/);
@@ -158,7 +218,7 @@ describe("authorize — authorization and impersonation", () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
 
     sim.seedMandate(id, { ...record, agentSecret: undefined });
     await expect(
@@ -170,7 +230,7 @@ describe("authorize — authorization and impersonation", () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
 
     const unrelated = buildMandate(7, 8, BASE_POLICY);
     sim.seedMandate(id, { ...record, agentSecret: unrelated.agentSecret });
@@ -184,7 +244,7 @@ describe("authorize — authorization and impersonation", () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
 
     const tampered = {
       ...record,
@@ -201,11 +261,9 @@ describe("authorize — authorization and impersonation", () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
     await sim.authorize(id, 400n, category(ASSET), category(ACTION), category(DEST), NOW);
 
-    // Attempt to lie: claim only 100 has been spent (real on-chain figure is
-    // 400), which would make a further 400 look safe against the 500 cap.
     const currentRecord = sim.getPrivateState().mandates[Buffer.from(id).toString("hex")];
     sim.seedMandate(id, { ...currentRecord, spentTotal: 100n });
 
@@ -213,6 +271,7 @@ describe("authorize — authorization and impersonation", () => {
       sim.authorize(id, 400n, category(ASSET), category(ACTION), category(DEST), NOW)
     ).rejects.toThrow(/stale or forged spend state/);
   });
+
 });
 
 describe("revoke", () => {
@@ -220,10 +279,10 @@ describe("revoke", () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
     await sim.authorize(id, 100n, category(ASSET), category(ACTION), category(DEST), NOW);
 
-    const ledger = await sim.revoke(id);
+    const ledger = await sim.revoke(id, NOW);
     expect(ledger.revoked.member(id)).toBe(true);
 
     await expect(
@@ -235,10 +294,10 @@ describe("revoke", () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
-    await sim.revoke(id);
+    await sim.createMandate(id, NOW);
+    await sim.revoke(id, NOW);
 
-    await expect(sim.revoke(id)).rejects.toThrow(/already revoked/);
+    await expect(sim.revoke(id, NOW)).rejects.toThrow(/already revoked/);
   });
 
   it("cannot be called against an unregistered mandate", async () => {
@@ -246,17 +305,17 @@ describe("revoke", () => {
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
 
-    await expect(sim.revoke(id)).rejects.toThrow(/unknown mandate/);
+    await expect(sim.revoke(id, NOW)).rejects.toThrow(/unknown mandate/);
   });
 
   it("cannot be called by a non-principal (agent-only) caller", async () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
 
     sim.seedMandate(id, { ...record, principalSecret: undefined });
-    await expect(sim.revoke(id)).rejects.toThrow(/principal secret/);
+    await expect(sim.revoke(id, NOW)).rejects.toThrow(/principal secret/);
   });
 });
 
@@ -265,7 +324,7 @@ describe("privacy — no leakage of private policy through observable state", ()
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, { ...BASE_POLICY, maxAmount: 424_242n });
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
 
     try {
       await sim.authorize(id, 500_000n, category(ASSET), category(ACTION), category(DEST), NOW);
@@ -282,22 +341,20 @@ describe("privacy — no leakage of private policy through observable state", ()
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, { ...BASE_POLICY, maxAmount: 123_456n });
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
     const ledger = await sim.authorize(id, 100n, category(ASSET), category(ACTION), category(DEST), NOW);
 
-    // spentCommitment is the only ledger field that varies with spend
-    // activity; it must be a hash, never the plaintext amount or cap.
     const commitment = ledger.spentCommitment.lookup(id);
     expect(commitment.length).toBe(32);
-    const asBigEndianNumber = Buffer.from(commitment).toString("hex");
-    expect(asBigEndianNumber).not.toContain("1e240"); // 123456 in hex, defensively checked as a substring
+    const asHex = Buffer.from(commitment).toString("hex");
+    expect(asHex).not.toContain("1e240"); // 123456 in hex, defensively checked as a substring
   });
 
   it("consecutive spend commitments for the same mandate are unlinkable byte strings", async () => {
     const sim = await WardenSimulator.create();
     const { id, record } = buildMandate(1, 2, BASE_POLICY);
     sim.seedMandate(id, record);
-    await sim.createMandate(id);
+    await sim.createMandate(id, NOW);
 
     const afterFirst = await sim.authorize(id, 50n, category(ASSET), category(ACTION), category(DEST), NOW);
     const c1 = Buffer.from(afterFirst.spentCommitment.lookup(id)).toString("hex");
@@ -305,9 +362,6 @@ describe("privacy — no leakage of private policy through observable state", ()
     const c2 = Buffer.from(afterSecond.spentCommitment.lookup(id)).toString("hex");
 
     expect(c1).not.toBe(c2);
-    // Neither commitment is a simple function of the running total alone —
-    // both are 32 bytes of hash output with no shared substring of length
-    // that would indicate a structural relationship an observer could exploit.
     expect(c1.slice(0, 8)).not.toBe(c2.slice(0, 8));
   });
 });
