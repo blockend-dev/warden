@@ -1,13 +1,5 @@
-// Server-side demo session state. Runs inside the Next.js server process (a
-// Route Handler, not a browser bundle) specifically so it can use
-// `@warden/sdk`'s `LocalSimulatorNetwork` — real compiled-circuit execution
-// via `@midnight-ntwrk/compact-runtime` — without needing that runtime to be
-// browser-bundled. See `docs/IMPLEMENTATION-NOTES.md` for why this demo runs
-// against the simulator rather than the live devnet. State is process-memory
-// only (a `globalThis` singleton, the standard way to survive Next.js
-// dev-server module reloads) — restarting the server resets the demo, which
-// is the correct behavior for a judge re-running the script from a clean
-// state.
+// Server-side demo session. Held in a globalThis singleton so it survives
+// Next.js dev-server reloads; restarting the server resets the demo.
 
 import { createWarden, type MandateHandoff, type WardenClient } from "@warden/sdk";
 

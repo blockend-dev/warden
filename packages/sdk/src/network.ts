@@ -7,13 +7,8 @@ import { Contract, ledger, witnesses, emptyWardenPrivateState, type Ledger, type
 
 type CallResult = { ledger: Ledger; privateState: WardenPrivateState };
 
-/**
- * Everything a `WardenClient` needs from "the chain" — deliberately narrow,
- * so a real network-backed implementation (using
- * `@midnight-ntwrk/midnight-js`'s provider stack once a devnet/proof server
- * is available — see docs/IMPLEMENTATION-NOTES.md) is a drop-in
- * `WardenBackend`, not a rewrite of `client.ts`.
- */
+/** Everything a `WardenClient` needs from "the chain", kept narrow so a real
+ * network-backed provider is a drop-in replacement. */
 export interface WardenBackend {
   getLedger(): Ledger;
   createMandate(privateState: WardenPrivateState, id: Uint8Array): Promise<CallResult>;
@@ -29,28 +24,13 @@ export interface WardenBackend {
 }
 
 /**
- * Wave 1's `WardenBackend`: the real, compiled `warden.compact` circuits,
- * run in-process via `@midnight-ntwrk/compact-runtime` — the same simulator
- * methodology Midnight's own official example contracts use for testing
- * (see docs/IMPLEMENTATION-NOTES.md). Every `assert` in the contract
- * executes for real; nothing here is a mock of the protocol's logic.
+ * In-process `WardenBackend`: runs the real compiled circuits via
+ * `@midnight-ntwrk/compact-runtime`, no proof server or network. Live
+ * deployment is currently blocked by a compiler/SDK version mismatch, not
+ * this codebase — see docs/IMPLEMENTATION-NOTES.md.
  *
- * What it is *not* a substitute for: real proof generation against a live
- * proof server, and real submission to a devnet/Preview/Preprod network. A
- * live devnet was reached separately (`infra/devnet/`) but contract
- * deployment there is currently blocked by a published-package version
- * mismatch between the current Compact compiler and the stable `midnight-js`
- * SDK line, not by anything in this codebase — see
- * docs/IMPLEMENTATION-NOTES.md. `WardenBackend` exists specifically so that
- * gap is a swappable implementation, not a load-bearing assumption baked
- * into the client.
- *
- * Models the real Midnight shape correctly even though it's local: the
- * public ledger state (`this.state`) is one shared value every party's
- * calls read from and write back to, while each party keeps its own private
- * state (secrets, policy context) entirely separately, in its own
- * `WardenClient` — exactly as a real deployment would split "the chain" from
- * "each wallet's local state".
+ * `state`/`zswap` are the shared public ledger; `privateState` is passed in
+ * per call as each party's own state.
  */
 export class LocalSimulatorNetwork implements WardenBackend {
   private readonly address: string;

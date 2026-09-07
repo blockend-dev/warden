@@ -1,7 +1,4 @@
-// End-to-end SDK test: two genuinely separate `WardenClient`s (their own
-// generated identities, their own private state) transacting against one
-// shared `LocalSimulatorNetwork` — proving the principal/agent split works
-// through the public API, not just inside `packages/contracts`' own tests.
+// End-to-end: two separate WardenClients over one shared LocalSimulatorNetwork.
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createWarden, type WardenClient } from "./client.js";
@@ -91,9 +88,7 @@ describe("WardenClient — two-party flow", () => {
   it("refuses an agent that was never handed the mandate", async () => {
     const handoff = await principal.createMandate({ agentPublicKey: agent.publicKey, policy: POLICY });
     const impostorAgent = createWarden({ role: "agent", network });
-    // The impostor never received the handoff, so it has no local record at
-    // all for this id — this is the "no local record" witness failure path,
-    // not a mismatched-secret one.
+    // Never received the handoff, so it has no local record for this id.
     await expect(impostorAgent.authorize(handoff.id, ACTION)).rejects.toThrow();
   });
 
@@ -101,8 +96,7 @@ describe("WardenClient — two-party flow", () => {
     const handoff = await principal.createMandate({ agentPublicKey: agent.publicKey, policy: POLICY });
     agent.importMandate(handoff);
     const result = await agent.authorize(handoff.id, ACTION);
-    // `authorize` resolves `void` — there is no return value to leak the
-    // policy through in the first place.
+    // authorize() resolves void — nothing to leak the policy through.
     expect(result).toBeUndefined();
   });
 });

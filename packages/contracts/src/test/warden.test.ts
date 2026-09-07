@@ -1,8 +1,5 @@
-// Real circuit tests: every call below runs the actual compiled
-// warden.compact logic (via WardenSimulator — see that file's header) with
-// no mocks. Each `describe` block is named after the threat-model attack it
-// proves fails; see `docs/THREAT-MODEL.md` for the narrative version of the
-// same list.
+// Runs the compiled contract via WardenSimulator; see docs/THREAT-MODEL.md
+// for the attack list these cases map to.
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { WardenSimulator } from "./warden-simulator.js";
@@ -12,9 +9,7 @@ const ASSET = "DEMO";
 const ACTION = "payment";
 const DEST = "vendor:approved";
 
-// A fixed reference instant, not wall-clock time: every expiry-adjacent test
-// pins the simulator's block time explicitly (via `atTime`) rather than
-// relying on `Date.now()`, so boundary cases are deterministic.
+// Fixed reference instant so expiry boundaries are deterministic.
 const EPOCH = 1_700_000_000n;
 const NOW = EPOCH;
 
@@ -93,15 +88,8 @@ describe("createMandate", () => {
 });
 
 describe("authorize — block-time expiry enforcement", () => {
-  // This block exists because of a real vulnerability found during audit:
-  // `authorize` used to take `currentTime` as a plain circuit argument
-  // supplied by the caller, so an agent could pass any value ≤ the (private)
-  // expiry regardless of the real time and the expiry check was
-  // unenforceable. The fix removed the argument entirely and switched to the
-  // standard library's `blockTimeLte`, which reads the ledger's own block
-  // time — there is no longer a "current time" value for a caller to lie
-  // about. See docs/IMPLEMENTATION-NOTES.md.
-
+  // Regression coverage: currentTime was previously caller-supplied and
+  // unenforceable. See docs/IMPLEMENTATION-NOTES.md.
   let sim: WardenSimulator;
   let id: Uint8Array;
 
@@ -310,10 +298,7 @@ describe("authorize — authorization and impersonation", () => {
     const preRaceState = sim.getPrivateState().mandates[Buffer.from(id).toString("hex")];
     await sim.authorize(id, 300n, category(ASSET), category(ACTION), category(DEST), NOW);
 
-    // A second call whose witness data reflects the state *before* the first
-    // call landed — as if it were proven concurrently against the same
-    // starting point. It must be evaluated against the real, now-advanced
-    // on-chain commitment, not the stale one it was built from.
+    // Simulates a second proof built concurrently from the same pre-state.
     sim.seedMandate(id, preRaceState);
     await expect(
       sim.authorize(id, 300n, category(ASSET), category(ACTION), category(DEST), NOW)

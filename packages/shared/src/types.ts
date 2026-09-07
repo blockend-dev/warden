@@ -1,8 +1,4 @@
-// Types shared between the SDK, the agent adapter, and the demo UI. These
-// describe *application-level* shapes (human-readable policy input, mandate
-// summaries for display) — the contract's own generated types
-// (`packages/contracts/src/managed/warden/contract/index.d.ts`) remain the
-// source of truth for what actually crosses into a circuit call.
+// Application-level shapes shared between the SDK, agent adapter, and demo UI.
 
 export type PolicyInput = {
   /** Cumulative spending cap over the mandate's lifetime, in the asset's smallest unit. */
@@ -24,8 +20,7 @@ export type ActionRequest = {
 
 export type MandateStatus = "active" | "revoked" | "expired" | "unknown";
 
-/** What's safe to show in a UI: never the policy itself unless the viewer is
- * the mandate's own principal (see docs/PRIVACY.md). */
+/** Safe to display — never the policy itself unless the viewer is the principal. */
 export type MandateSummary = {
   id: string; // hex
   status: MandateStatus;

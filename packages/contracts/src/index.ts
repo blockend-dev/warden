@@ -1,8 +1,4 @@
-// Public entry point for `@warden/contracts`. Consumers (the SDK, tests
-// outside this package) should import from here rather than reaching into
-// `src/managed/**` directly — this is the one place that path is allowed to
-// leak, so it only has to be updated here if the compiler's output layout
-// ever changes.
+// Public entry point — import from here, not `src/managed/**` directly.
 
 export {
   Contract,

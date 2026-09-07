@@ -1,20 +1,7 @@
-// Test/SDK-facing simulator for the Warden contract, following the same
-// pattern Midnight's own official examples use for unit testing (see
-// `docs/IMPLEMENTATION-NOTES.md` — this mirrors `example-counter`'s
-// `CounterSimulator` and `example-bboard`'s `BBoardSimulator`, updated for
-// the current, async `@midnight-ntwrk/compact-runtime@0.19.0` API, which
-// this file's construction was empirically verified against before being
-// written this way).
-//
-// A fresh `CircuitContext` is built for every call rather than threaded
-// forward, so tests can pin `atTime` deterministically — `authorize` and
-// `createMandate` both assert against `blockTimeLte`, which reads whatever
-// time the context was built with (verified empirically; see
-// docs/IMPLEMENTATION-NOTES.md). No Docker, no proof server, no network:
-// `contract.impureCircuits.*` runs the real compiled circuit logic
-// (including every `assert`) in-process. A rejected call throws — callers
-// should expect that and catch it, exactly as the deployed contract will
-// reject an invalid transaction.
+// In-process simulator: runs the compiled contract via
+// @midnight-ntwrk/compact-runtime, no proof server or network. A fresh
+// CircuitContext is built per call so tests can pin blockTimeLte's clock
+// via `atTime`. A rejected call throws.
 
 import {
   createCircuitContext,
@@ -94,10 +81,8 @@ export class WardenSimulator {
     this.privateState = context.callContext.currentPrivateState as WardenPrivateState;
   }
 
-  /** Folds the pending spend-commitment nonce a `freshNonce` witness call
-   * stashed during a just-succeeded call into confirmed state. Mirrors what
-   * `packages/sdk`'s `WardenClient` does after a real network call confirms
-   * — see `packages/sdk/src/client.ts`, `finalizeAfterCall`. */
+  /** Folds a `freshNonce` call's pending nonce into confirmed state after a
+   * successful call (mirrors `client.ts`'s `finalizeAfterCall`). */
   private confirmNonce(id: Uint8Array, amountJustSpent: bigint): void {
     const rec = this.privateState.mandates[idHex(id)];
     if (!rec?.pendingNonce) return;
@@ -109,8 +94,8 @@ export class WardenSimulator {
     });
   }
 
-  /** `atTime`, in Unix seconds, is what `blockTimeLte` inside the circuit
-   * sees as "now" — omit it to use the simulator's real wall-clock default. */
+  /** `atTime` (Unix seconds) is what `blockTimeLte` sees as "now"; omit for
+   * wall-clock time. */
   async createMandate(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
     const res = await this.contract.impureCircuits.createMandate(this.buildContext("createMandate", atTime), id);
     this.commit(res.context);

@@ -16,35 +16,17 @@ import { LocalSimulatorNetwork, type WardenBackend } from "./network.js";
 export type WardenRole = "principal" | "agent";
 
 export type CreateMandateParams = {
-  /** The public-key commitment of the agent this mandate authorizes — the
-   * agent generates this locally (`createWarden({ role: "agent" }).publicKey`)
-   * and hands it to the principal out of band before the mandate exists. */
+  /** The agent's public-key commitment, handed to the principal out of band. */
   agentPublicKey: Uint8Array;
   policy: PolicyInput;
 };
 
-/**
- * Everything an agent needs to act under a mandate the principal created:
- * the public id, and the full private context (policy + both
- * key-commitments). Handed from principal to agent out of band — Warden's
- * contract never transmits this; see docs/ARCHITECTURE.md §7 for the honest
- * limitation this implies in Wave 1.
- */
+/** Sent from principal to agent out of band; the contract never transmits it. */
 export type MandateHandoff = {
   readonly id: Uint8Array;
   readonly context: MandateContext;
-  /**
-   * The nonce actually behind the mandate's on-chain initial spend
-   * commitment (`spendCommitment(0, spentNonce)` — see
-   * `docs/ARCHITECTURE.md` §5). `createMandate`'s own `freshNonce` witness
-   * call decides this value; the agent was not present for that call and so
-   * cannot guess it, but needs it to pass the very first `authorize`'s
-   * "does the witness's claimed prior state match the on-chain commitment"
-   * check. This is real cross-party state the handoff has to carry, not a
-   * placeholder — omitting it is a real, reproducible bug (a `StaleState`
-   * rejection on an agent's very first authorize call), not a
-   * theoretical concern.
-   */
+  // Nonce behind the mandate's initial spend commitment. Required for the
+  // agent's first authorize call to match the on-chain commitment.
   readonly spentNonce: Uint8Array;
 };
 
@@ -84,8 +66,7 @@ export class WardenClient {
     return this.identity.publicKey;
   }
 
-  /** Principal only. Creates a new mandate and returns the `MandateHandoff`
-   * to send to the agent out of band. */
+  /** Principal only. Returns the handoff to send to the agent. */
   async createMandate(params: CreateMandateParams): Promise<MandateHandoff> {
     const policy = {
       maxAmount: params.policy.maxAmount,
@@ -134,11 +115,7 @@ export class WardenClient {
     this.privateState = withMandate(this.privateState, handoff.id, record);
   }
 
-  /** Agent only. Throws a typed `WardenError` (see `errors.ts`) rather than
-   * resolving falsy — callers should treat any rejection as "blocked", not
-   * inspect a boolean. Expiry is checked by the circuit itself against the
-   * ledger's own block time (`blockTimeLte` — see `warden.compact`), not a
-   * value this SDK supplies, so there is nothing to pass or forge here. */
+  /** Agent only. Throws a typed `WardenError` on rejection. */
   async authorize(id: Uint8Array, action: ActionRequest): Promise<void> {
     try {
       const net = await this.network;
@@ -167,15 +144,8 @@ export class WardenClient {
     }
   }
 
-  /** Reads public ledger state (safe for anyone to call), plus this
-   * session's own locally-held mandate context if it has one, to also
-   * report `"expired"`. `expiry` is disclosed only as a transaction
-   * argument on `createMandate`/`authorize` (see `warden.compact`), not
-   * persisted anywhere in ledger state itself — a caller with no local
-   * record of the mandate (a third party that was never handed its context)
-   * cannot distinguish "active" from "expired" from public state alone, and
-   * `status()` correctly reports "active" for them either way rather than
-   * guessing. */
+  /** Reads public ledger state; also reports "expired" if this session holds
+   * the mandate's context locally (expiry isn't persisted on-chain). */
   async status(id: Uint8Array): Promise<MandateSummary> {
     const net = await this.network;
     const ledger = net.getLedger();
@@ -193,14 +163,9 @@ export class WardenClient {
 
 export type CreateWardenOptions = {
   role: WardenRole;
-  /** Reuses a previously generated identity (e.g. restored from wherever the
-   * caller persists it — this SDK does not persist secrets itself). */
+  /** Reuses a previously generated identity; this SDK does not persist secrets. */
   identity?: Identity;
-  /** Defaults to a process-wide shared `LocalSimulatorNetwork` so that, in a
-   * single demo process, a principal's and an agent's `createWarden(...)`
-   * calls transact against the same ledger without wiring it up explicitly.
-   * Pass an explicit network (or a real `WardenBackend`, once one exists) to
-   * opt out. */
+  /** Defaults to a process-wide shared `LocalSimulatorNetwork`. */
   network?: WardenBackend | Promise<WardenBackend>;
 };
 

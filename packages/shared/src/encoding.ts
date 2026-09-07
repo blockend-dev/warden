@@ -1,12 +1,7 @@
-// Small, dependency-free encoders shared by the SDK, the agent adapter, and
-// the demo UI. None of this is cryptography — it just turns human-readable
-// labels into the fixed-width `Bytes<32>` identifiers warden.compact expects,
-// deterministically, so "DEMO" always encodes the same way everywhere.
+// Encoders shared by the SDK, agent adapter, and demo UI for the fixed-width
+// Bytes<32> identifiers warden.compact expects.
 
-/** Left-pads a UTF-8 string into a fixed 32-byte identifier. Not a hash —
- * its only job is "the same string always encodes to the same bytes," which
- * is all an opaque policy category needs. Throws rather than silently
- * truncating if the label doesn't fit. */
+/** Left-pads a UTF-8 string into a fixed 32-byte identifier. Not a hash. */
 export function encodeCategory(label: string): Uint8Array {
   const bytes = new TextEncoder().encode(label);
   if (bytes.length > 32) {
@@ -37,8 +32,7 @@ export function fromHex(hex: string): Uint8Array {
   return out;
 }
 
-/** Cryptographically random 32 bytes, via the Web Crypto API available in
- * both modern Node and every evergreen browser — never `Math.random()`. */
+/** Cryptographically random 32 bytes — never `Math.random()`. */
 export function randomBytes32(): Uint8Array {
   const bytes = new Uint8Array(32);
   globalThis.crypto.getRandomValues(bytes);
