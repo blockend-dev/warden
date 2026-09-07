@@ -237,6 +237,61 @@ currently stops — useful for whoever revisits this once the ecosystem's
 package versions catch up to each other, not something to delete because it
 didn't reach 100%.
 
+## The block-time vulnerability (found by adversarial audit)
+
+`authorize` originally declared `currentTime: Uint<64>` as a plain circuit
+argument and asserted `currentTime <= ctx.policy.expiry`. Auditing the
+contract adversarially rather than re-reading it for prose accuracy surfaced
+the obvious problem: **nothing bound that argument to reality.** An agent
+generating its own proof supplies its own arguments; passing
+`currentTime = 0` (or any value `<= expiry`) satisfies the assertion
+regardless of the actual time, so mandate expiry was unenforceable by
+construction. This had shipped with 26 passing tests — every test happened
+to pass a plausible `currentTime`, so nothing caught it; passing tests are
+not evidence an invariant is real if the test never tries to violate it via
+the actual attacker-controlled input.
+
+**Finding the real primitive, not inventing one.** Rather than hand-rolling
+a workaround, we checked whether Compact has a trusted time source at all.
+`docs.midnight.network/develop/reference/compact/compact-std-library/` lists
+`blockTimeLt` / `blockTimeLte` / `blockTimeGt` / `blockTimeGte`, each
+`circuit blockTime<Cmp>(time: Uint<64>): Boolean`, comparing the **ledger's
+own current block time** — not a caller-supplied one — against the given
+value. Confirmed against the real compiler (0.34.0), not just the docs page:
+
+- Calling `blockTimeLte(expiry)` where `expiry` is witness-derived fails to
+  compile with a disclosure error — the compiler itself reports that the
+  call "might disclose the upper bound of the time being checked," meaning
+  the comparison value must become a public input. `disclose(expiry)` fixes
+  it. This is the mechanical reason `Policy.expiry` moved from private to
+  public (see `docs/PRIVACY.md`) — not a design preference.
+- `@midnight-ntwrk/compact-runtime`'s `createCircuitContext(...)` takes an
+  optional 9th positional `time` argument (seconds); `blockTimeLte` reads
+  it live. Verified empirically: a circuit asserting `blockTimeLte(500)`
+  passes when the context is built with `time: 400` and fails when built
+  with `time: 600` — and, separately, that *mutating* an existing context's
+  `callContext.time` after construction has **no effect** (the check reads
+  from wherever the runtime actually resolves current time internally, not
+  that field) — only rebuilding via `createCircuitContext` with a new `time`
+  works. This is why `WardenSimulator` now builds a fresh `CircuitContext`
+  per call instead of threading one context forward, and why its
+  `createMandate`/`authorize`/`revoke` all take an optional `atTime` for
+  deterministic tests.
+- Omitting `time` defaults to real wall-clock seconds
+  (`Math.floor(Date.now()/1000)`), confirmed by comparing runtime behavior
+  against `Date.now()` directly — this is why `packages/sdk`'s
+  `LocalSimulatorNetwork` needs no explicit time handling at all: it already
+  gets real current time by default, both in this simulator and in any real
+  deployed network.
+
+**Fix.** `authorize`'s `currentTime` parameter was removed entirely (there is
+no longer a value for a caller to lie about); both `authorize` and
+`createMandate` now assert `blockTimeLte(disclose(ctx.policy.expiry))`.
+`createMandate` gained a real "not already expired" check as a byproduct,
+which it never had (`expiry > 0` was the entire old check, useless against a
+past timestamp). See `docs/THREAT-MODEL.md`, "Vulnerabilities found and
+fixed," and `docs/ARCHITECTURE.md` §5b.
+
 ## Bugs actually caught by running the stack, not just reasoning about it
 
 Kept here because "we tested it" should mean something — these are two real

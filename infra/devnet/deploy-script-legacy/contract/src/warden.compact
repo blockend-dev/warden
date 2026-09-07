@@ -1,3 +1,11 @@
+// SNAPSHOT — compiled with Compact 0.31.1 for the SDK version-skew
+// experiment described in docs/IMPLEMENTATION-NOTES.md ("Live devnet").
+// Predates the block-time audit fix in packages/contracts/src/warden.compact
+// (this copy still takes a caller-supplied `currentTime`, since fixing that
+// wasn't the point of this experiment). Not the current design — see
+// packages/contracts/src/warden.compact for that, and docs/THREAT-MODEL.md
+// for the vulnerability this version has and the shipped one does not.
+//
 // Warden — privacy-preserving authorization protocol for autonomous agents.
 //
 // A principal grants an agent a mandate: a private policy (spending cap, asset,

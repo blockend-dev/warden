@@ -16,8 +16,8 @@ section summarizes.
 
 | | |
 |---|---|
-| **Private** (never leaves the principal's/agent's machine as plaintext) | `Policy` (cap, asset, action type, destination category, expiry, action-count limit, salt), principal/agent secret keys, the specific amount/asset/type/destination of any individual requested action, the cumulative spend total in plaintext |
-| **Public** (on-chain ledger state) | The mandate id (a commitment — see §3), membership in `registered`/`revoked`, an opaque, re-randomized spend commitment per mandate, an action counter per mandate |
+| **Private** (never leaves the principal's/agent's machine as plaintext) | `Policy.maxAmount`/`.asset`/`.actionType`/`.destinationCategory`/`.actionCountLimit`/`.salt`, principal/agent secret keys, the specific amount/asset/type/destination of any individual requested action, the cumulative spend total in plaintext |
+| **Public** (on-chain ledger state) | The mandate id (a commitment — see §3), `Policy.expiry` (see §5), membership in `registered`/`revoked`, an opaque, re-randomized spend commitment per mandate, an action counter per mandate |
 | **Derived** (computed, not stored) | `mandateId`, `spendCommitment` — both pure functions of private inputs, exposed so the SDK can compute them client-side |
 
 ## 3. Commitment-gated authorization
@@ -75,6 +75,58 @@ unlinkable to each other and reveal nothing about the total or the cap — an
 observer sees only that *some* update occurred. See `docs/PRIVACY.md` for the
 one caveat this does **not** cover.
 
+## 5b. Expiry: enforced against real time, not a claimed one
+
+`authorize` originally took `currentTime` as a plain circuit argument and
+asserted `currentTime <= expiry` — which an adversarial prover could satisfy
+by simply not passing a real timestamp, since nothing tied the argument to
+reality. This was found during a production audit and is documented in full
+in `docs/IMPLEMENTATION-NOTES.md`. The fix removes the argument entirely and
+uses the Compact standard library's `blockTimeLte(x)`, which evaluates
+against the ledger's own block time rather than a caller-supplied value:
+
+```
+assert(blockTimeLte(disclose(ctx.policy.expiry)), "mandate expired");
+```
+
+The one cost: `blockTimeLte`'s argument must be public (the compiler enforces
+this — the check is resolved against real block time at inclusion, not
+purely inside the proof), so `expiry` is disclosed on every `createMandate`
+and `authorize` call. Every other policy field is unaffected. See
+`docs/PRIVACY.md` for the full accounting.
+
+## 5c. Why one contract
+
+Warden's on-chain state — `registered`, `revoked`, `spentCommitment`,
+`actionCount` — looks, at a glance, like four separable responsibilities
+(a mandate registry, revocation state, spend-authorization state, and a
+policy counter). It is deliberately one contract, for two independent
+reasons, not convenience:
+
+1. **They must be checked and mutated atomically.** `authorize` has to see
+   a consistent snapshot of "is this registered, is it revoked, what's the
+   current spend commitment, what's the current action count" and update the
+   last two together, in one proof. Splitting these across contracts that
+   advance independently opens exactly the kind of race the rest of this
+   document works to close — e.g. a revocation landing in one contract while
+   a spend-authorization proof built against the pre-revocation state is
+   still in flight in another. Atomicity here is a security property, not an
+   implementation convenience.
+2. **It isn't cleanly achievable today regardless.** `authorize` and
+   `createMandate` both call witnesses, and the Compact reference documents
+   that a circuit which calls a witness cannot currently satisfy an external
+   `contract` type — the mechanism a "spend-authorization contract" would
+   need to be called, with its witness-dependent checks intact, from a
+   separate "registry contract." A split attempted today would have to pass
+   raw values across the contract boundary instead, which defeats the
+   witness-privacy model this whole design rests on.
+
+A future split would only be justified by a genuine independent-boundary
+need — e.g. a Wave 2 auditor-disclosure contract that reads Warden's public
+state without ever touching its witnesses. Nothing in Wave 1 has that need:
+one mandate's registration, revocation, and spend state are one lifecycle,
+not four protocols that happen to share a key.
+
 ## 6. Repository layout
 
 ```
@@ -121,6 +173,30 @@ docs/
   `StaleStateError` in `packages/sdk`'s own end-to-end test the first time
   the two-client flow was actually run, not something worked out on paper in
   advance. See `packages/sdk/src/client.ts`, `MandateHandoff.spentNonce`.
+
+## 8b. Known non-guarantees
+
+Stated once, plainly, rather than left implied. Warden does **not** prove or
+guarantee:
+
+- That a real-world identity controls `principalPk`/`agentPk` — only that
+  someone controls the secret bound to that commitment, whoever they are.
+- That a requested action's off-chain effect actually happened — Warden
+  authorizes; it does not execute or witness real-world effects (§7).
+- That the principal and agent are distinct parties — nothing stops one
+  entity from holding both secrets for one mandate, which is a legitimate
+  self-authorization use case but forfeits the separation-of-duties property
+  revocation is meant to provide against a *different* agent.
+- That `requestedAmount` corresponds to a real value transfer of any kind —
+  Warden is an authorization gate, not a payment rail (§7); a zero-amount
+  action is valid and still consumes an action-count slot.
+- Anything about actions taken before the mandate existed or after it was
+  revoked/expired beyond "the circuit would not have produced a proof for
+  them" — Warden cannot retroactively affect state a caller changed outside
+  it.
+
+See `docs/PRIVACY.md`, "What each circuit cryptographically proves," for the
+precise positive claim each circuit makes.
 
 ## 8. Wave 2 / Wave 3 extension points
 

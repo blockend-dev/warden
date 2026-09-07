@@ -24,6 +24,22 @@ This file is not a description of theoretical security; where something is
   (e.g. why the action-count limit is a fixed `Uint<16>`, why cumulative
   spend uses a re-committed running total rather than a history scan).
 
+## Vulnerabilities found and fixed by a production audit
+
+**Block-time forgery (critical, fixed).** `authorize` used to take
+`currentTime: Uint<64>` as a plain circuit argument and assert
+`currentTime <= ctx.policy.expiry`. Nothing tied that argument to reality —
+an agent could pass any value it liked, so expiry was unenforceable by
+construction; the check only ever validated a relationship between two
+values the same party controlled. Fixed by removing the argument and using
+the Compact standard library's `blockTimeLte`, which is evaluated against
+the ledger's own block time. Cost: `blockTimeLte`'s argument must be public,
+so `Policy.expiry` is now disclosed (see `docs/PRIVACY.md`); every other
+field is unaffected. Full account: `docs/IMPLEMENTATION-NOTES.md`. Tests:
+`authorize — block-time expiry enforcement` (four tests, including exact
+boundary in both directions) and `createMandate > rejects an expiry that has
+already passed` / `> accepts an expiry exactly at the current block time`.
+
 ## Attacks
 
 1. **Forge a mandate (claim an id without knowing its policy).**
@@ -155,9 +171,31 @@ This file is not a description of theoretical security; where something is
     requested action's parameters are circuit *inputs* — they are bound into
     the proof itself. There is no "proof, then parameters" two-step to tamper
     between; a proof is a proof of the specific `(id, amount, asset,
-    actionType, destinationCategory, currentTime)` tuple it was generated
-    for, and changing any of them invalidates the proof rather than the
-    action.
+    actionType, destinationCategory)` tuple it was generated for (plus the
+    ledger's own block time at verification — not a caller-supplied value,
+    see above), and changing any of them invalidates the proof rather than
+    the action.
+
+16. **Forge or lie about the current time.** See "Vulnerabilities found and
+    fixed" above — this was a real, exploitable gap, not merely tested for.
+
+17. **Concurrent/double execution: two proofs built from the same starting
+    state.** Expected: only the one that lands first succeeds; the second is
+    evaluated against the now-advanced on-chain state and fails, rather than
+    both silently applying or the second double-spending. Actual: identical
+    mechanism to #8/#9 — the second proof's witness-claimed `(priorSpent,
+    priorNonce)` no longer reproduces the current `spentCommitment`. Test:
+    `authorize — authorization and impersonation > a second authorize built
+    from the same pre-state as an already-landed one fails, rather than
+    double-spending`.
+
+18. **Substitute one mandate's spend state for another's.** Expected:
+    rejected — a mandate's spend commitment is meaningless outside its own
+    `id`. Actual: `authorize` for mandate B checks B's witness-claimed
+    `(priorSpent, priorNonce)` against B's own on-chain `spentCommitment`;
+    supplying mandate A's real values fails the same way a fabricated one
+    would. Test: `authorize — authorization and impersonation > fails when
+    mandate B's authorize is attempted with mandate A's real spend state`.
 
 ## Explicitly out of scope (see `docs/ARCHITECTURE.md` §7)
 

@@ -15,7 +15,8 @@ stored. **COMMITMENT** = a one-way hash standing in for a private value.
 
 | Datum | Class | Who can see it |
 |---|---|---|
-| `Policy` (cap, asset, action type, destination category, expiry, action-count limit) | PRIVATE | Whoever holds the `MandateContext`: the principal always, the agent because it must to prove compliance |
+| `Policy.maxAmount` / `.asset` / `.actionType` / `.destinationCategory` / `.actionCountLimit` | PRIVATE | Whoever holds the `MandateContext`: the principal always, the agent because it must to prove compliance |
+| `Policy.expiry` | PUBLIC | Any chain observer, disclosed on every `createMandate` and `authorize` call. Not a design preference: `blockTimeLte`, the standard-library primitive that checks it against the ledger's real block time, requires its argument to be public — the compiler rejects the alternative (see `docs/IMPLEMENTATION-NOTES.md`, "the block-time vulnerability"). This is the one field the audit moved from PRIVATE to PUBLIC; every other field is unaffected |
 | `principalSecret` / `agentSecret` | PRIVATE | Their respective holder only. Never appears in any circuit argument, ledger write, or SDK return value — only a `pkOf(...)` commitment to each ever reaches the contract |
 | `mandateId` | PUBLIC / COMMITMENT | Any chain observer. Reveals nothing about the policy, principal, or agent behind it without already knowing the preimage |
 | `registered` / `revoked` set membership | PUBLIC | Any chain observer. Reveals "a mandate with this id exists / was revoked", nothing about who or what it governs |
@@ -43,12 +44,45 @@ able to audit their own agent's spending. It is not visible to anyone else.
 
 | Party | Sees |
 |---|---|
-| **Chain observers / validators** | `mandateId`, set membership, opaque `spentCommitment`, `actionCount` — and that a submitted proof verified or a transaction reverted. Nothing about policy content, identities, or individual action parameters |
+| **Chain observers / validators** | `mandateId`, set membership, opaque `spentCommitment`, `actionCount`, `Policy.expiry` — and that a submitted proof verified or a transaction reverted. Nothing about the cap, asset, action type, destination category, identities, or individual action parameters |
 | **The principal** | Everything about mandates they created: full policy, and (by locally tracking the same commitment chain the circuit checks) the exact spend history of their own agent |
 | **The agent** | The `MandateContext` it was handed (policy + both key-commitments) and its own spend history for mandates it holds — never another agent's mandate, never the principal's secret |
 | **A counterparty to an authorized action** | Nothing, from Warden itself — Warden is an authorization gate, not a payment or messaging channel (see `docs/ARCHITECTURE.md` §7). Any disclosure to a counterparty would happen in whatever system carries out the action, outside Warden's scope |
 | **Warden's frontend (`apps/web`)** | Exactly what the connected session's private state holds locally (browser storage) plus whatever it reads from the public ledger — no more than any other agent/principal client |
 | **Warden's SDK consumer** | Whatever role (principal/agent) it authenticates as locally; the SDK never phones home to a Warden-operated backend, because there isn't one — see `docs/ARCHITECTURE.md` |
+
+## What each circuit cryptographically proves — stated precisely
+
+Loose language ("proves the action is authorized") invites overclaiming.
+Per circuit, what a verified proof actually establishes:
+
+- **`createMandate`** proves: the prover knows a `MandateContext` whose hash
+  equals the public `id`; the prover knows a secret whose `pkOf` equals that
+  context's `principalPk`; the context's `actionCountLimit` is nonzero; and
+  the ledger's block time was `<=` the context's (now-public) `expiry` at
+  the moment the proof was checked. It does **not** prove the principal is
+  any particular real-world identity — only that they control the secret
+  behind `principalPk`, whatever that secret is bound to outside Warden.
+- **`authorize`** proves: the prover knows the `MandateContext` behind `id`;
+  the prover knows a secret whose `pkOf` equals that context's `agentPk`;
+  block time is `<= expiry`; the requested asset/action type/destination
+  category exactly equal the context's; the mandate's action count so far is
+  below `actionCountLimit`; the prover's claimed prior spend `(total, nonce)`
+  hashes to the value currently stored on-chain for `id`; and the new total
+  (`prior + requestedAmount`) is `<= maxAmount`. It does **not** prove the
+  requested action was actually carried out anywhere outside Warden, that
+  `requestedAmount` reflects a real-world transfer, or that the agent is a
+  distinct party from the principal (see "Known non-guarantees" below).
+- **`revoke`** proves: the prover knows the `MandateContext` behind `id` and
+  a secret whose `pkOf` equals `principalPk`. It does not prove *why* the
+  mandate is being revoked, nor does it (or can it) undo actions already
+  authorized before revocation.
+
+In short: every circuit proves **knowledge of secrets bound to a specific
+public commitment, checked against specific public and previously-committed
+values** — never a real-world fact about identity, intent, or off-chain
+effect. See "Known non-guarantees" in `docs/ARCHITECTURE.md` for the
+consolidated list of what Warden explicitly does not claim.
 
 ## The judge test
 
