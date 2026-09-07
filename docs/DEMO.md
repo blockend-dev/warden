@@ -7,20 +7,21 @@ PRINCIPAL                         AGENT                          CHAIN
 ─────────                         ─────                          ─────
 holds: Policy, salt,               holds: MandateContext           sees only:
   principalSecret                   (handed off out of band),        mandateId (hash)
-  (derives agentSecret               agentSecret                     registered / revoked
-  for the agent too, in                                               (set membership)
-  this MVP's single-session      ──authorize(id, amount,──▶          spentCommitment[id]
-  demo — see ARCHITECTURE §7)      asset, type, dest,                 (opaque, re-randomized)
-                                    now)                              actionCount[id]
-──createMandate(id)──────▶                                         a proof verified,
-                                 ◀──REVOKED / BLOCKED /               or a transaction reverted
-◀──REVOKE──────────────────       AUTHORIZED (from whether
-   (publishes id to `revoked`)    the call above threw)
+  (derives agentSecret               agentSecret                     Policy.expiry (public —
+  for the agent too, in                                                see PRIVACY.md)
+  this MVP's single-session      ──authorize(id, amount,──▶          registered / revoked
+  demo — see ARCHITECTURE §7)      asset, type, dest)                 (set membership)
+                                                                      spentCommitment[id]
+──createMandate(id)──────▶                                            (opaque, re-randomized)
+                                 ◀──REVOKED / BLOCKED /               actionCount[id]
+◀──REVOKE──────────────────       AUTHORIZED (from whether          a proof verified,
+   (publishes id to `revoked`)    the call above threw)               or a transaction reverted
 ```
 
-Nothing above the "CHAIN" column ever crosses into it except the four public
+Everything above the "CHAIN" column stays there except the five public
 fields listed. That's the whole privacy story in one picture — see
-`docs/PRIVACY.md` for the field-by-field version.
+`docs/PRIVACY.md` for the field-by-field version, including why `expiry`
+specifically is the one policy field that's public.
 
 ## Script
 
@@ -60,9 +61,11 @@ not by the UI remembering a flag.
 - The masked policy is actually never sent anywhere the UI could read it
   back from — see `docs/PRIVACY.md`'s SDK-surface leakage tests.
 - The "on-chain" framing describes what a full Preview/Preprod deployment
-  does; running this exact script end-to-end against a live network additionally
-  requires the Docker-based proof server + devnet, which this development
-  environment does not have available (see `docs/IMPLEMENTATION-NOTES.md`) —
-  the demo as shippable today runs the identical circuit logic through the
-  simulator, and `docs/ARCHITECTURE.md` states plainly where the line between
-  "simulated" and "deployed" currently sits.
+  does. A local devnet (real node, indexer, proof server) was brought up and
+  verified live — see `docs/IMPLEMENTATION-NOTES.md`, "Live devnet" — but
+  actually deploying `warden.compact` there is currently blocked by a
+  published-package version mismatch between the Compact compiler and the
+  stable `midnight-js` SDK, not by anything in this demo. The demo as
+  shippable today runs the identical circuit logic through the simulator;
+  `docs/ARCHITECTURE.md` states plainly where the line between "simulated"
+  and "deployed" currently sits.

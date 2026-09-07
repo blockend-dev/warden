@@ -75,11 +75,13 @@ way to verify compliance without trusting an operator.
 
 ## 4. Why privacy is necessary
 
-The mandate itself — the cap, the permitted asset, the destination category,
-the expiry — is exactly the information a principal will never put on a
-public ledger. But the proof that an action complied with it must still be
-publicly checkable, or decentralized enforcement collapses back into "trust
-the operator." Warden needs both at once: private terms, public proof.
+The mandate itself — the cap, the permitted asset, the destination category —
+is exactly the information a principal will never put on a public ledger
+(one field, the expiry, is a deliberate, narrow exception — see
+[`docs/PRIVACY.md`](docs/PRIVACY.md)). But the proof that an action complied
+with the mandate must still be publicly checkable, or decentralized
+enforcement collapses back into "trust the operator." Warden needs both at
+once: private terms, public proof.
 
 ## 5. Why Midnight
 
@@ -182,7 +184,11 @@ tied to a named test.
 Witness output is untrusted by every circuit that consumes it; every
 security-relevant claim a witness makes is re-verified against a public
 commitment before anything depends on it. Full model:
-[`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md).
+[`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md), which also documents a
+real vulnerability a production audit found and fixed — mandate expiry was
+originally checked against a caller-supplied timestamp an agent could set to
+anything, making it unenforceable. It now checks the ledger's real block
+time via the Compact standard library's `blockTimeLte`.
 
 ## 12. Current limitations
 

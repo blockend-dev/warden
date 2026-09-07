@@ -199,6 +199,11 @@ export default function Page() {
                     : "████████████████"}
                 </button>
               </Row>
+              <Row label="EXPIRES (public)">
+                <span className="font-mono text-xs text-slate-300" title="Enforced on-chain via blockTimeLte — the circuit discloses this value to check it against the ledger's real block time; see docs/PRIVACY.md.">
+                  in {policy.expiresInSeconds}s
+                </span>
+              </Row>
               <Row label="ACTIONS AUTHORIZED">{status?.actionsAuthorized ?? 0}</Row>
 
               <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
