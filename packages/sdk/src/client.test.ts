@@ -35,6 +35,20 @@ describe("WardenClient — two-party flow", () => {
     const status = await principal.status(handoff.id);
     expect(status.status).toBe("active");
     expect(status.actionsAuthorized).toBe(1);
+    expect(status.spentCommitment).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("re-randomizes spentCommitment on every authorize, and leaves it unset for an unknown id", async () => {
+    const handoff = await principal.createMandate({ agentPublicKey: agent.publicKey, policy: POLICY });
+    agent.importMandate(handoff);
+    const genesis = (await principal.status(handoff.id)).spentCommitment;
+
+    await agent.authorize(handoff.id, ACTION);
+    const afterOne = (await principal.status(handoff.id)).spentCommitment;
+    expect(afterOne).not.toBe(genesis);
+
+    const unknown = await principal.status(new Uint8Array(32));
+    expect(unknown.spentCommitment).toBeUndefined();
   });
 
   it("blocks an over-cap action without exposing the cap in the error", async () => {

@@ -7,7 +7,7 @@ import {
   type WardenPrivateState
 } from "@warden/contracts";
 import { pureCircuits } from "@warden/contracts";
-import { encodeCategory, randomBytes32 } from "@warden/shared";
+import { encodeCategory, randomBytes32, toHex } from "@warden/shared";
 import type { ActionRequest, MandateSummary, PolicyInput } from "@warden/shared";
 import { classifyCircuitError } from "./errors.js";
 import { createIdentity, type Identity } from "./identity.js";
@@ -156,7 +156,8 @@ export class WardenClient {
     return {
       id: idHex(id),
       status: !registered ? "unknown" : revoked ? "revoked" : expired ? "expired" : "active",
-      actionsAuthorized: registered ? Number(ledger.actionCount.lookup(id).read()) : 0
+      actionsAuthorized: registered ? Number(ledger.actionCount.lookup(id).read()) : 0,
+      spentCommitment: registered ? toHex(ledger.spentCommitment.lookup(id)) : undefined
     };
   }
 }

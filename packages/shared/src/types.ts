@@ -25,4 +25,8 @@ export type MandateSummary = {
   id: string; // hex
   status: MandateStatus;
   actionsAuthorized: number;
+  /** Current opaque `spentCommitment[id]` value, hex. Real public ledger
+   * state — re-randomized on every `authorize`, reveals no amount. Absent
+   * for an unregistered id. */
+  spentCommitment?: string;
 };
