@@ -1,312 +1,146 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import dynamic from "next/dynamic";
+import { motion } from "framer-motion";
+import { MandateCard } from "@/components/mandate/mandate-card";
+import { timeAgo } from "@/lib/format";
+import { useSession } from "@/store/session-store";
 
-type MandateStatus = { status: "active" | "revoked" | "expired" | "unknown"; actionsAuthorized: number };
-type LogEntry = { id: number; kind: "created" | "authorized" | "blocked" | "revoked" | "error"; text: string; detail?: string };
+const AuthorizationGraph = dynamic(
+  () => import("@/components/graph/authorization-graph").then((m) => m.AuthorizationGraph),
+  { ssr: false, loading: () => <div className="h-[320px] w-full rounded-2xl skeleton sm:h-[380px]" /> }
+);
 
-const DEFAULT_POLICY = {
-  maxAmount: 500,
-  asset: "DEMO",
-  actionType: "payment",
-  destinationCategory: "vendor:approved",
-  expiresInSeconds: 3600,
-  actionCountLimit: 5
-};
+const KIND_LABEL: Record<string, string> = { created: "Created", authorized: "Authorized", blocked: "Blocked", revoked: "Revoked", error: "Error" };
+const KIND_DOT: Record<string, string> = { created: "bg-sky-400", authorized: "bg-emerald-400", blocked: "bg-amber-400", revoked: "bg-rose-400", error: "bg-slate-500" };
 
-let logCounter = 0;
+export default function DashboardPage() {
+  const { mandates, hydrated, resetAll } = useSession();
+  const [resetting, setResetting] = useState(false);
 
-export default function Page() {
-  const [mandateId, setMandateId] = useState<string | null>(null);
-  const [status, setStatus] = useState<MandateStatus | null>(null);
-  const [policy, setPolicy] = useState(DEFAULT_POLICY);
-  const [log, setLog] = useState<LogEntry[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [policyRevealed, setPolicyRevealed] = useState(false);
-
-  const pushLog = useCallback((entry: Omit<LogEntry, "id">) => {
-    logCounter += 1;
-    setLog((prev) => [{ id: logCounter, ...entry }, ...prev].slice(0, 8));
-  }, []);
-
-  const createMandate = useCallback(async () => {
-    setBusy("create");
-    setPolicyRevealed(false);
-    try {
-      const res = await fetch("/api/mandate", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(policy)
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message ?? "failed to create mandate");
-      setMandateId(data.id);
-      setStatus(data.status);
-      pushLog({ kind: "created", text: "Mandate created", detail: `id ${shorten(data.id)}` });
-    } catch (e) {
-      pushLog({ kind: "error", text: "Could not create mandate", detail: (e as Error).message });
-    } finally {
-      setBusy(null);
-    }
-  }, [policy, pushLog]);
-
-  const runAction = useCallback(
-    async (label: string, amount: number) => {
-      if (!mandateId) return;
-      setBusy(label);
-      try {
-        const res = await fetch("/api/authorize", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            amount,
-            asset: policy.asset,
-            actionType: policy.actionType,
-            destinationCategory: policy.destinationCategory
-          })
-        });
-        const data = await res.json();
-        if (data.authorized) {
-          setStatus(data.status);
-          pushLog({ kind: "authorized", text: "AUTHORIZED", detail: `action #${data.status.actionsAuthorized}` });
-        } else {
-          const kind = data.error?.kind === "MandateRevokedError" ? "revoked" : "blocked";
-          pushLog({
-            kind,
-            text: kind === "revoked" ? "REVOKED" : "BLOCKED — POLICY VIOLATION",
-            detail: data.error?.message
-          });
-        }
-      } catch (e) {
-        pushLog({ kind: "error", text: "Request failed", detail: (e as Error).message });
-      } finally {
-        setBusy(null);
-      }
-    },
-    [mandateId, policy, pushLog]
+  const counts = useMemo(
+    () => ({
+      active: mandates.filter((m) => m.status === "active").length,
+      revoked: mandates.filter((m) => m.status === "revoked").length,
+      expired: mandates.filter((m) => m.status === "expired").length
+    }),
+    [mandates]
   );
 
-  const revoke = useCallback(async () => {
-    if (!mandateId) return;
-    setBusy("revoke");
+  const activity = useMemo(
+    () =>
+      mandates
+        .flatMap((m) => m.activity.map((a) => ({ ...a, mandateId: m.id, mandateLabel: m.label })))
+        .sort((a, b) => b.ts - a.ts)
+        .slice(0, 8),
+    [mandates]
+  );
+
+  async function resetSession() {
+    setResetting(true);
     try {
-      const res = await fetch("/api/revoke", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok || !data.revoked) throw new Error(data.error?.message ?? "revoke failed");
-      setStatus(data.status);
-      pushLog({ kind: "revoked", text: "Agent revoked", detail: "future actions will be rejected by the circuit" });
-    } catch (e) {
-      pushLog({ kind: "error", text: "Could not revoke", detail: (e as Error).message });
+      await fetch("/api/mandate", { method: "DELETE" });
+      resetAll();
     } finally {
-      setBusy(null);
+      setResetting(false);
     }
-  }, [mandateId, pushLog]);
+  }
 
   return (
-    <main className="mx-auto flex max-w-5xl flex-col gap-10 px-6 py-16">
-      <header className="flex flex-col gap-3">
-        <span className="w-fit rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs font-medium uppercase tracking-widest text-sky-300">
-          Midnight Buildathon · Wave 1
-        </span>
-        <h1 className="font-display text-4xl font-semibold tracking-tight text-white sm:text-5xl">Warden</h1>
-        <p className="max-w-2xl text-lg text-slate-400">
-          Give AI agents real on-chain authority without giving them unrestricted power.
-        </p>
-      </header>
-
-      <section className="grid gap-6 lg:grid-cols-[1.1fr,1fr]">
-        {/* Mandate creation */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide text-slate-400">1 · Principal — create mandate</h2>
-          <p className="mb-5 text-sm text-slate-500">
-            These values are the mandate&rsquo;s private policy. They are never sent anywhere they can be read back from
-            once the mandate exists — see <code className="text-slate-300">docs/PRIVACY.md</code>.
+    <div className="mx-auto max-w-6xl px-6 py-14">
+      <section className="grid gap-8 lg:grid-cols-[1fr,1.1fr] lg:items-center">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}>
+          <span className="eyebrow">Verifiable constrained autonomy</span>
+          <h1 className="mt-3 font-display text-4xl font-semibold leading-[1.1] tracking-tight text-white sm:text-5xl">
+            Give AI agents real authority — without giving them unrestricted power.
+          </h1>
+          <p className="mt-4 max-w-xl text-base leading-relaxed text-slate-400">
+            A principal grants an agent a private, cryptographically enforceable mandate. The agent can act on-chain
+            only when the action satisfies that mandate — proven in zero knowledge, never disclosed to make the proof
+            work.
           </p>
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <Field label="Max amount">
-              <input
-                type="number"
-                className="input"
-                value={policy.maxAmount}
-                onChange={(e) => setPolicy((p) => ({ ...p, maxAmount: Number(e.target.value) }))}
-              />
-            </Field>
-            <Field label="Asset">
-              <input className="input" value={policy.asset} onChange={(e) => setPolicy((p) => ({ ...p, asset: e.target.value }))} />
-            </Field>
-            <Field label="Action type">
-              <input
-                className="input"
-                value={policy.actionType}
-                onChange={(e) => setPolicy((p) => ({ ...p, actionType: e.target.value }))}
-              />
-            </Field>
-            <Field label="Destination category">
-              <input
-                className="input"
-                value={policy.destinationCategory}
-                onChange={(e) => setPolicy((p) => ({ ...p, destinationCategory: e.target.value }))}
-              />
-            </Field>
-            <Field label="Expires in (seconds)">
-              <input
-                type="number"
-                className="input"
-                value={policy.expiresInSeconds}
-                onChange={(e) => setPolicy((p) => ({ ...p, expiresInSeconds: Number(e.target.value) }))}
-              />
-            </Field>
-            <Field label="Max actions">
-              <input
-                type="number"
-                className="input"
-                value={policy.actionCountLimit}
-                onChange={(e) => setPolicy((p) => ({ ...p, actionCountLimit: Number(e.target.value) }))}
-              />
-            </Field>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <Link href="/mandates/new" className="btn-primary">
+              Create a mandate
+            </Link>
+            {hydrated && mandates.length > 0 && (
+              <button type="button" onClick={resetSession} disabled={resetting} className="btn-ghost">
+                {resetting ? "Resetting…" : "Reset session"}
+              </button>
+            )}
           </div>
-          <button
-            onClick={createMandate}
-            disabled={busy === "create"}
-            className="mt-5 w-full rounded-lg bg-sky-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-sky-400 disabled:opacity-50"
-          >
-            {busy === "create" ? "Generating mandate…" : mandateId ? "Create new mandate" : "Create mandate"}
-          </button>
-        </div>
+          <div className="mt-8 grid max-w-sm grid-cols-3 gap-3 text-sm">
+            <Stat label="Active" value={counts.active} tone="text-emerald-300" />
+            <Stat label="Revoked" value={counts.revoked} tone="text-rose-300" />
+            <Stat label="Expired" value={counts.expired} tone="text-amber-300" />
+          </div>
+        </motion.div>
 
-        {/* Live authorization card */}
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">Authorization card</h2>
-          {!mandateId ? (
-            <p className="text-sm text-slate-500">No mandate yet — create one to begin.</p>
-          ) : (
-            <div className="flex flex-col gap-4">
-              <Row label="AGENT">Treasury Agent #01</Row>
-              <Row label="MANDATE ID (public)">
-                <span className="font-mono text-xs text-slate-300">{shorten(mandateId)}</span>
-              </Row>
-              <Row label="STATUS">
-                <StatusBadge status={status?.status ?? "unknown"} />
-              </Row>
-              <Row label="PRIVATE POLICY">
-                <button
-                  onClick={() => setPolicyRevealed((v) => !v)}
-                  className="rounded border border-white/10 bg-black/30 px-2 py-1 font-mono text-xs text-slate-400 hover:text-slate-200"
-                  title="This only ever reveals what THIS browser's principal session already holds locally — never a network round-trip."
-                >
-                  {policyRevealed
-                    ? `cap ${policy.maxAmount} · ${policy.asset} · ${policy.actionType} · ${policy.destinationCategory}`
-                    : "████████████████"}
-                </button>
-              </Row>
-              <Row label="EXPIRES (public)">
-                <span className="font-mono text-xs text-slate-300" title="Enforced on-chain via blockTimeLte — the circuit discloses this value to check it against the ledger's real block time; see docs/PRIVACY.md.">
-                  in {policy.expiresInSeconds}s
-                </span>
-              </Row>
-              <Row label="ACTIONS AUTHORIZED">{status?.actionsAuthorized ?? 0}</Row>
-
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <button
-                  onClick={() => runAction("valid", 120)}
-                  disabled={busy !== null}
-                  className="rounded-lg bg-emerald-500/90 px-3 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-50"
-                >
-                  2 · Agent — authorized action (120)
-                </button>
-                <button
-                  onClick={() => runAction("attack", 99999)}
-                  disabled={busy !== null}
-                  className="rounded-lg bg-amber-500/90 px-3 py-2 text-sm font-semibold text-amber-950 transition hover:bg-amber-400 disabled:opacity-50"
-                >
-                  3 · Agent — over-cap attempt
-                </button>
-                <button
-                  onClick={revoke}
-                  disabled={busy !== null}
-                  className="rounded-lg bg-rose-500/90 px-3 py-2 text-sm font-semibold text-rose-950 transition hover:bg-rose-400 disabled:opacity-50"
-                >
-                  4 · Principal — revoke agent
-                </button>
-                <button
-                  onClick={() => runAction("post-revoke", 120)}
-                  disabled={busy !== null}
-                  className="rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/20 disabled:opacity-50"
-                >
-                  5 · Agent — retry after revoke
-                </button>
-              </div>
-            </div>
-          )}
+        <div className="panel p-2">
+          <AuthorizationGraph mandates={mandates} />
         </div>
       </section>
 
-      {/* Activity log */}
-      <section className="rounded-2xl border border-white/10 bg-white/[0.02] p-6">
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-400">What happened</h2>
-        {log.length === 0 ? (
-          <p className="text-sm text-slate-500">Nothing yet.</p>
+      <section className="mt-16">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="eyebrow">Mandates in this session</h2>
+          <Link href="/mandates/new" className="text-xs font-medium text-sky-400 hover:text-sky-300">
+            + New mandate
+          </Link>
+        </div>
+        {!hydrated ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="h-40 rounded-xl skeleton" />
+            ))}
+          </div>
+        ) : mandates.length === 0 ? (
+          <div className="panel flex flex-col items-center gap-3 px-6 py-16 text-center">
+            <p className="text-sm text-slate-400">No mandates yet. Create one to see the authorization graph come alive.</p>
+            <Link href="/mandates/new" className="btn-primary">
+              Create your first mandate
+            </Link>
+          </div>
         ) : (
-          <ul className="flex flex-col gap-2">
-            {log.map((entry) => (
-              <li key={entry.id} className="flex items-center gap-3 rounded-lg border border-white/5 bg-black/20 px-3 py-2 text-sm">
-                <OutcomeDot kind={entry.kind} />
-                <span className="font-semibold text-slate-200">{entry.text}</span>
-                {entry.detail && <span className="truncate text-slate-500">— {entry.detail}</span>}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {mandates.map((m) => (
+              <MandateCard key={m.id} mandate={m} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mt-16">
+        <h2 className="eyebrow mb-4">Recent activity</h2>
+        {activity.length === 0 ? (
+          <p className="text-sm text-slate-500">Nothing has happened yet.</p>
+        ) : (
+          <ul className="panel divide-y divide-white/5">
+            {activity.map((entry) => (
+              <li key={`${entry.mandateId}-${entry.seq}`} className="flex items-center gap-3 px-4 py-3 text-sm">
+                <span className={`h-2 w-2 flex-none rounded-full ${KIND_DOT[entry.kind]}`} />
+                <span className="font-medium text-slate-200">{KIND_LABEL[entry.kind]}</span>
+                <Link href={`/mandates/${entry.mandateId}`} className="text-slate-500 hover:text-sky-400">
+                  {entry.mandateLabel}
+                </Link>
+                {entry.detail && <span className="hidden truncate text-slate-600 sm:inline">— {entry.detail}</span>}
+                <span className="ml-auto flex-none text-xs text-slate-600">{timeAgo(entry.ts)}</span>
               </li>
             ))}
           </ul>
         )}
       </section>
-
-      <footer className="text-xs text-slate-600">
-        Every state above reflects a real call into the compiled <code>warden.compact</code> circuit via{" "}
-        <code>@warden/sdk</code> — see <code>docs/DEMO.md</code> for the walkthrough this page follows and{" "}
-        <code>docs/IMPLEMENTATION-NOTES.md</code> for what running against a live Midnight network still requires.
-      </footer>
-    </main>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1">
-      <span className="text-xs text-slate-500">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 border-b border-white/5 pb-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</span>
-      <span className="text-sm text-slate-200">{children}</span>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: MandateStatus["status"] }) {
-  const styles: Record<MandateStatus["status"], string> = {
-    active: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",
-    revoked: "bg-rose-500/15 text-rose-300 border-rose-500/30",
-    expired: "bg-amber-500/15 text-amber-300 border-amber-500/30",
-    unknown: "bg-white/10 text-slate-300 border-white/20"
-  };
-  return <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold uppercase ${styles[status]}`}>{status}</span>;
-}
-
-function OutcomeDot({ kind }: { kind: LogEntry["kind"] }) {
-  const color: Record<LogEntry["kind"], string> = {
-    created: "bg-sky-400",
-    authorized: "bg-emerald-400",
-    blocked: "bg-amber-400",
-    revoked: "bg-rose-400",
-    error: "bg-slate-500"
-  };
-  return <span className={`h-2 w-2 flex-none rounded-full ${color[kind]} ${kind === "authorized" ? "proof-pulse" : ""}`} />;
-}
-
-function shorten(hex: string): string {
-  return hex.length <= 14 ? hex : `${hex.slice(0, 8)}…${hex.slice(-6)}`;
+function Stat({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <div className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2">
+      <div className={`font-display text-xl font-semibold ${tone}`}>{value}</div>
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
+    </div>
+  );
 }
