@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+**/dist
+**/.next
+**/src/managed
+.git
+*.log
+infra/devnet/**/logs
+infra/devnet/**/*.leveldb
+infra/devnet/**/private-state-store*
