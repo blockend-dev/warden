@@ -2,6 +2,7 @@
   "name": "@warden/devnet-deploy-script-legacy",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Experiment: is a live devnet deployment achievable today with the *stable* midnight-js line? warden.compact recompiled with an older Compact compiler (0.31.1) to match the compact-runtime version midnight-js@4.1.1's dependency chain actually ships with. Isolated from infra/devnet/deploy-script (which targets the current 0.34.0 compiler) specifically so it can pin a different, conflicting compact-runtime version. See docs/IMPLEMENTATION-NOTES.md.",
   "scripts": {

@@ -2,6 +2,7 @@
   "name": "@warden/devnet-deploy-script",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "Real end-to-end validation: deploys warden.compact to the local Docker devnet (infra/devnet/standalone.yml) and submits real proof-bearing transactions. See docs/IMPLEMENTATION-NOTES.md for why this is separate from packages/sdk's LocalSimulatorNetwork rather than a replacement for it.",
   "scripts": {
