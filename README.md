@@ -14,6 +14,11 @@ mandate, by construction, not by convention.
 > and does not claim to, verify what an agent does off-chain — see
 > "Current limitations" (§12) below.
 
+**Live demo (no setup required):** [wardenweb-production.up.railway.app](https://wardenweb-production.up.railway.app/) —
+runs the real compiled circuits against `LocalSimulatorNetwork`, hosted as a
+single persistent process; see [`docs/DEPLOY-RAILWAY.md`](docs/DEPLOY-RAILWAY.md)
+for exactly what that does and doesn't mean.
+
 License: [Apache 2.0](LICENSE). Authoritative technical spec:
 [`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md) — if anything below and that
 document disagree, the spec (and the Compact source it was derived from)
@@ -205,6 +210,10 @@ does **not** hide everything — see [§13](#13-non-guarantees) for the
 complete list of what it explicitly does not prove.
 
 ## 8. Demo
+
+Try it live: [wardenweb-production.up.railway.app](https://wardenweb-production.up.railway.app/) —
+or run it locally (§0). Shot-by-shot script for the current UI:
+[`docs/DEMO-SCRIPT.md`](docs/DEMO-SCRIPT.md).
 
 See [`docs/DEMO.md`](docs/DEMO.md) for the full sub-60-second script: create
 a private mandate, an authorized action succeeds, an over-cap action is

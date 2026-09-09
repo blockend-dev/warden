@@ -2,15 +2,19 @@
 
 A shot-by-shot script for recording the product walkthrough. Everything
 below is the *actual* current UI (`apps/web`) and *actual* current circuit
-behavior — nothing here is aspirational. Run `npm run dev --workspace
-apps/web` and follow along at `http://localhost:3000`.
+behavior — nothing here is aspirational. Live, publicly reachable instance:
+**[wardenweb-production.up.railway.app](https://wardenweb-production.up.railway.app/)**
+— judges can use this directly, no setup required. To run it locally
+instead: `npm run dev --workspace apps/web` at `http://localhost:3000`.
 
 Environment note to say on camera, once, near the start: **this runs
 against `LocalSimulatorNetwork`** — the real compiled Compact circuits,
 executed in-process, no live network. The dashboard's environment badge
-says `LOCAL SIMULATOR` for exactly this reason; see
-[`README.md`](../README.md) §12 for why a live devnet deployment isn't part
-of this submission.
+says `LOCAL SIMULATOR` for exactly this reason, on the live deployment too
+— hosting it publicly changes nothing about that boundary; see
+[`README.md`](../README.md) §12 for why a live *Midnight* devnet deployment
+isn't part of this submission, and [`docs/DEPLOY-RAILWAY.md`](DEPLOY-RAILWAY.md)
+for exactly what the Railway deployment is (and isn't).
 
 ## Core sequence (~75 seconds)
 
