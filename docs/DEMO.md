@@ -1,5 +1,12 @@
 # Warden — Demo Script (sub-60-second walkthrough)
 
+> This document is the protocol-level script (still accurate) written
+> against the original single-page demo UI. The frontend has since become
+> a multi-page app (dashboard, mandate wizard, mandate detail) — for the
+> current, UI-accurate shot-by-shot script, see
+> [`docs/DEMO-SCRIPT.md`](DEMO-SCRIPT.md). The privacy diagram and "what
+> makes this demo honest" reasoning below still apply unchanged.
+
 ## The one-diagram privacy boundary
 
 ```
