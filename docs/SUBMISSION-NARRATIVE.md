@@ -63,10 +63,13 @@ on-chain and is permanent. Spend limits and action limits are enforced
 without ever publishing the policy behind them.
 
 What Wave 1 deliberately does **not** include: nested delegation (an agent
-sub-granting part of its own authority), a secured principal→agent handoff
-channel, and live network deployment (blocked by a documented, current
-package-version mismatch across the Midnight ecosystem, not a Warden
-defect — see [`README.md`](../README.md) §12). Wave 2 has a complete,
+sub-granting part of its own authority) and a secured principal→agent
+handoff channel. (Live network deployment was an open question at the Wave
+1 freeze, blocked at the time by a documented package-version mismatch
+across the Midnight ecosystem, not a Warden defect — since resolved, with
+the full mandate lifecycle now proven on the live public Preprod network,
+real proofs and real transactions; see [`README.md`](../README.md) §12.)
+Wave 2 has a complete,
 adversarially-reviewed protocol design for the first of these
 (`docs/WAVE-2-DELEGATION-DESIGN.md`) that is not implemented — a decision,
 not an oversight: Wave 1 was frozen and audited before any Wave 2 line was
@@ -91,6 +94,6 @@ everything":
 This is a primitive, not a finished product with users or revenue today —
 the honest adoption path is: ship the SDK and agent adapter as an
 integration surface (already usable independently of the demo UI, see
-`README.md` §9–§10), get it in front of one or two agent-framework
+`README.md` §8), get it in front of one or two agent-framework
 integrators, and let Wave 2's delegation model be the reason a platform
 picks Warden over rolling its own allowlist.

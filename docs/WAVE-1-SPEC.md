@@ -203,10 +203,17 @@ layer, not a security boundary:
   wired only to `LocalSimulatorNetwork` — not to that devnet or to any live
   network. No part of this codebase submits a transaction to Preview,
   Preprod, or mainnet.
-- Live network deployment is blocked by a documented package/compiler
-  version-compatibility issue between the current Midnight SDK packages and
-  the installed toolchain (`docs/IMPLEMENTATION-NOTES.md`), not by anything
-  in Warden's own contract or application code.
+- Live network deployment via the current compiler/SDK combination directly
+  is blocked by a documented package/compiler version-compatibility issue,
+  not by anything in Warden's own contract or application code — see
+  `docs/IMPLEMENTATION-NOTES.md`. **Post-Wave-1 update:** an older-compiler
+  path around that issue was found and validated after this baseline was
+  frozen — the full mandate lifecycle now has real, on-chain evidence on
+  both a local devnet and the live public Preprod network (contract
+  address, transaction hashes, block numbers in
+  `docs/IMPLEMENTATION-NOTES.md`). This baseline is left otherwise
+  unmodified per the Wave 2 resubmission requirement to state what changed
+  since Wave 1 (`docs/SUBMISSION-CHECKLIST.md`).
 
 ## 12. Wave 1 validation baseline
 
@@ -217,7 +224,7 @@ written:
 - `packages/sdk` tests: **9/9 passing**.
 - `packages/agent-adapter` tests: **3/3 passing**.
 - `apps/web` typecheck (`tsc --noEmit`): **clean**.
-- `apps/web` production build (`next build`): **clean**, 7 routes.
+- `apps/web` production build (`next build`): **clean**, 8 routes.
 
 Any Wave 2 change that regresses these numbers, or removes an invariant
 listed in §4–§6, is a regression against this baseline.

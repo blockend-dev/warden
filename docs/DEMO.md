@@ -1,11 +1,8 @@
-# Warden — Demo Script (sub-60-second walkthrough)
+# Warden — Verification Procedure
 
-> This document is the protocol-level script (still accurate) written
-> against the original single-page demo UI. The frontend has since become
-> a multi-page app (dashboard, mandate wizard, mandate detail) — for the
-> current, UI-accurate shot-by-shot script, see
-> [`docs/DEMO-SCRIPT.md`](DEMO-SCRIPT.md). The privacy diagram and "what
-> makes this demo honest" reasoning below still apply unchanged.
+A command-line procedure for independently checking Warden's claims — no
+browser, no recording, no trust required. For a narrated UI walkthrough
+instead, see [`docs/DEMO-SCRIPT.md`](DEMO-SCRIPT.md).
 
 ## The one-diagram privacy boundary
 
@@ -26,53 +23,94 @@ holds: Policy, salt,               holds: MandateContext           sees only:
 ```
 
 Everything above the "CHAIN" column stays there except the five public
-fields listed. That's the whole privacy story in one picture — see
-`docs/PRIVACY.md` for the field-by-field version, including why `expiry`
-specifically is the one policy field that's public.
+fields listed — see [`docs/PRIVACY.md`](PRIVACY.md) for the field-by-field
+version, including why `expiry` specifically is the one policy field that's
+public.
 
-## Script
+## 1. Verify the contract compiles
 
-**0:00–0:10 — Create mandate.** Principal sets a policy: *cap 500, asset
-`DEMO`, action type `payment`, one destination category, expires in an hour,
-up to 5 actions.* UI shows the policy fields, then immediately masks them:
-`PRIVATE POLICY ████████`. Only the resulting `mandateId` (a hex commitment)
-appears as something "public."
+```bash
+npm run compact
+```
 
-**0:10–0:25 — Authorized action.** Agent requests a payment within the cap.
-UI shows a real circuit call running (not a spinner over nothing — the proof
-generation step is visible), then **✓ AUTHORIZED**. The policy stays masked;
-`spentCommitment` visibly changes to a new opaque value; `actionCount`
-increments to 1.
+Expect `compact compile src/warden.compact src/managed/warden` to report the
+circuits compiling and exit `0`. This is the buildathon's technical gate —
+no other check matters if this doesn't pass.
 
-**0:25–0:40 — Attack.** Agent requests a payment that would exceed the
-remaining cap. The SAME circuit call is attempted — not a disabled button,
-not a client-side check — and the call itself fails.
-**✕ BLOCKED — POLICY VIOLATION.** No amount, cap, or remaining-headroom
-number is ever shown to explain *why*, on purpose (see `docs/PRIVACY.md`).
+## 2. Verify the test suites pass
 
-**0:40–0:50 — Revoke.** Principal presses **REVOKE AGENT**. `id` is inserted
-into the public `revoked` set. UI: **REVOKED**.
+```bash
+npm test
+```
 
-**0:50–0:60 — Attack again.** Agent retries the same valid, in-cap request
-that succeeded at 0:10–0:25. Same circuit, same call shape — now
-**✕ REVOKED**, rejected by the circuit's own `!revoked.member(pid)` check,
-not by the UI remembering a flag.
+Expect all three suites green: `packages/contracts` (36 tests, real circuit
+calls through the Compact-runtime simulator against the compiled contract —
+no mocks), `packages/sdk` (9 tests, a genuine two-client principal/agent
+flow), `packages/agent-adapter` (3 tests). Every attack in
+[`docs/THREAT-MODEL.md`](THREAT-MODEL.md) is a named test in this run, not a
+claim without evidence.
 
-## What makes this demo honest, not just fast
+## 3. Verify the live protocol flow yourself
 
-- Every one of the four states (AUTHORIZED / BLOCKED-POLICY / REVOKED /
-  the initial private-policy mask) is a direct readout of a real circuit
-  call's outcome against the real compiled `warden.compact`, run through the
-  Compact-runtime simulator described in `docs/IMPLEMENTATION-NOTES.md` — not
-  frontend state standing in for it.
-- The masked policy is actually never sent anywhere the UI could read it
-  back from — see `docs/PRIVACY.md`'s SDK-surface leakage tests.
-- The "on-chain" framing describes what a full Preview/Preprod deployment
-  does. A local devnet (real node, indexer, proof server) was brought up and
-  verified live — see `docs/IMPLEMENTATION-NOTES.md`, "Live devnet" — but
-  actually deploying `warden.compact` there is currently blocked by a
-  published-package version mismatch between the Compact compiler and the
-  stable `midnight-js` SDK, not by anything in this demo. The demo as
-  shippable today runs the identical circuit logic through the simulator;
-  `docs/ARCHITECTURE.md` states plainly where the line between "simulated"
-  and "deployed" currently sits.
+Against the [live deployment](https://wardenweb-production.up.railway.app/)
+— or `npm run dev --workspace apps/web` and substitute `http://localhost:3000`:
+
+```bash
+BASE=https://wardenweb-production.up.railway.app
+JAR=/tmp/warden-verify.jar
+
+# A real mandate id and status — not a mock:
+curl -s -c $JAR -b $JAR -X POST $BASE/api/mandate -H 'content-type: application/json' \
+  -d '{"maxAmount":500,"asset":"DEMO","actionType":"payment","destinationCategory":"vendor:approved","expiresInSeconds":3600,"actionCountLimit":5}'
+ID=$(...)   # extract "id" from the response above
+
+# Authorized: a real circuit call, spentCommitment visibly changes
+curl -s -c $JAR -b $JAR -X POST $BASE/api/authorize -H 'content-type: application/json' \
+  -d "{\"id\":\"$ID\",\"amount\":120,\"asset\":\"DEMO\",\"actionType\":\"payment\",\"destinationCategory\":\"vendor:approved\"}"
+
+# Over-cap: rejected by the circuit itself, PolicyViolationError, no amount/cap disclosed
+curl -s -c $JAR -b $JAR -X POST $BASE/api/authorize -H 'content-type: application/json' \
+  -d "{\"id\":\"$ID\",\"amount\":99999,\"asset\":\"DEMO\",\"actionType\":\"payment\",\"destinationCategory\":\"vendor:approved\"}"
+
+# Revoke, then retry the exact call that succeeded above:
+curl -s -c $JAR -b $JAR -X POST $BASE/api/revoke -H 'content-type: application/json' -d "{\"id\":\"$ID\"}"
+curl -s -c $JAR -b $JAR -X POST $BASE/api/authorize -H 'content-type: application/json' \
+  -d "{\"id\":\"$ID\",\"amount\":120,\"asset\":\"DEMO\",\"actionType\":\"payment\",\"destinationCategory\":\"vendor:approved\"}"
+# -> now fails with MandateRevokedError, same call shape that succeeded before revocation
+```
+
+Every response includes the real `status` (`active`/`revoked`, `actionsAuthorized`,
+`spentCommitment`) read straight off the ledger via `WardenClient.status()` —
+not application-layer bookkeeping standing in for it.
+
+## 4. Verify the privacy boundary
+
+At no point in step 3's responses does `maxAmount`, `actionCountLimit`, or
+any other private policy field appear — check the raw JSON yourself.
+`packages/contracts/src/test/warden.test.ts`'s "privacy" test group asserts
+this structurally (rejection messages never contain the private cap;
+consecutive `spentCommitment` values are unlinkable byte strings) rather
+than relying on the UI not showing something it secretly has.
+
+## 5. Read the source that backs all of the above
+
+- [`packages/contracts/src/warden.compact`](../packages/contracts/src/warden.compact) —
+  the whole contract, one file, three circuits.
+- [`packages/contracts/src/test/warden.test.ts`](../packages/contracts/src/test/warden.test.ts) —
+  every claim in this document as a named, passing test.
+- [`docs/WAVE-1-SPEC.md`](WAVE-1-SPEC.md) — the normative invariant list step
+  3's flow is checked against.
+
+## What "verified" means here
+
+Every state transition above is a direct readout of a real circuit call's
+outcome against the real compiled `warden.compact`, run through the
+Compact-runtime simulator — not frontend state standing in for it, and not
+a mocked response. The "on-chain" framing describes what a full
+Preview/Preprod/Mainnet deployment does; this web app itself runs the
+identical circuit logic through the simulator rather than a live network,
+for demo responsiveness and to avoid asking judges to fund a wallet — the
+same lifecycle has separately been proven end to end with real proofs and
+real transactions on the live public Preprod network, see
+[`docs/IMPLEMENTATION-NOTES.md`](IMPLEMENTATION-NOTES.md) for the evidence
+and [`README.md`](../README.md) §12 for the summary.

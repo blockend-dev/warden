@@ -1,334 +1,310 @@
-# Warden — Implementation Notes (toolchain grounding)
+# Warden — Implementation Notes
 
-Written before any contract code, per project instructions. This file records the
-*actual, verified* current state of the Midnight toolchain we are building against,
-as inspected on 2026-09-07, and calls out anywhere the earlier research thesis
-document used language that turned out to be imprecise once checked against real
-tooling.
+Implementation constraints and ecosystem limitations that shaped Warden's
+design, and the exact toolchain/API surface it's built against. This is
+reference material for extending the code, not a narrative of how it was
+built — for the protocol itself, see `docs/WAVE-1-SPEC.md`.
 
-## Verified toolchain (installed and run in this environment)
+## Toolchain
 
-- `compact` CLI (the version manager/wrapper): **0.5.2**, installed via the official
-  installer script from `midnightntwrk/compact` GitHub releases.
-- Compact **compiler** (managed by the CLI): **0.34.0** — confirmed via
-  `compact compile --version` after `compact update`. This matches the latest
+- `compact` CLI (version manager/wrapper): **0.5.2**, installed via the
+  official installer script from `midnightntwrk/compact` GitHub releases.
+- Compact **compiler** (managed by the CLI): **0.34.0**, matching the latest
   toolchain release documented at `docs.midnight.network/relnotes/compact`.
-- Node.js: v24 (both the Windows host and the WSL Ubuntu 24.04 environment we
-  compile in — Midnight's own docs recommend WSL on Windows, so we develop the
-  contract/SDK inside WSL rather than fighting an unsupported native-Windows path).
-- **Update, same day:** Docker Desktop was installed by the user (with WSL2
-  integration) partway through this project, and the full local devnet
+- Node.js 24, on Linux/macOS/WSL — Midnight's own docs recommend WSL on
+  Windows, so this project is developed and compiled there rather than
+  against an unsupported native-Windows path.
+- Compiling and running the test suites requires none of the below — only
+  the CLI and Node. The full local devnet
   (`infra/devnet/standalone.yml`: `midnightntwrk/midnight-node:0.22.3`,
   `midnightntwrk/indexer-standalone:4.0.0`, `midnightntwrk/proof-server:8.0.3`)
-  was brought up and verified healthy. A real HD wallet was built from the
-  well-known local-devnet genesis seed
-  (`0000000000000000000000000000000000000000000000000000000000000001` —
-  the same constant `example-counter`'s CLI uses for standalone mode), synced
-  against the real node, and showed a real genesis balance
-  (250,000,000,000,000 tNight) and real DUST
-  (1,250,000,000,000,000,000,000,000) — see "Live devnet: what actually
-  worked, and the real blocker found" below for the full result, including
-  where it currently stops short of a full proof-bearing deployment. Before
-  that point, the paragraph below described the prior (no-Docker) state of
-  this project and is kept for history:
-  - We **can** compile real `.compact` files with the real compiler and run the
-    real generated JS/circuit code against the TypeScript **simulator** pattern
-    (see below) — this requires no proof server or node.
-  - We **cannot** run the local devnet (`docker compose` node+indexer+proof-server)
-    or generate a real ZK-SNARK proof end-to-end, or submit a transaction to
-    Preview/Preprod testnet, inside this session. Anywhere the deliverable depends
-    on that, it is explicitly marked "requires Docker — not exercised in this
-    environment" rather than silently faked.
+  is optional, Docker-based, real-network validation tooling — see "Local
+  devnet" below.
 
-## Confirmed real API shape (pulled from the official, current example repos —
-not invented, not assumed from Solidity/EVM patterns)
+## Real API shape (from the official example repos)
 
-Source: `midnightntwrk/example-counter` and `midnightntwrk/example-bboard`
-(fetched directly, current `main`).
+Source: `midnightntwrk/example-counter` and `midnightntwrk/example-bboard`,
+current `main`.
 
 - Contracts declare `pragma language_version ...;` then `import CompactStandardLibrary;`.
 - Public state is declared with `export ledger <name>: <LedgerType>;` using
   `Cell<T>`, `Counter`, `Set<T>`, `Map<K,V>` (values may themselves be ledger
   types, e.g. `Map<Bytes<32>, Counter>`), `List<T>`, `MerkleTree`/`HistoricMerkleTree`.
-- `witness <name>(args): <Type>;` declares a private-state accessor implemented
-  in TypeScript. The TS implementation receives a `WitnessContext<Ledger, PrivateState>`
-  and returns `[newPrivateState, returnValue]`. **Witness output is untrusted by
-  the circuit** — this is stated explicitly in the docs, not an inference.
-- `export circuit name(args): ReturnType { ... }` is the on-chain entry point;
-  `assert(cond, "message")` is the invariant-checking primitive; `disclose(x)`
-  is *required* by the compiler before any witness-tainted value can be written
-  to the ledger, returned, or passed cross-contract — verified as a real,
-  compiler-enforced (not just documented) rule via the bboard contract's
-  `owner = disclose(publicKey(localSecretKey(), ...))` line.
-- Commitment pattern actually used in shipped code:
+- `witness <name>(args): <Type>;` declares a private-state accessor
+  implemented in TypeScript. The implementation receives a
+  `WitnessContext<Ledger, PrivateState>` and returns `[newPrivateState,
+  returnValue]`. **Witness output is untrusted by the circuit** — stated
+  explicitly in Midnight's own docs, not an inference Warden makes.
+- `export circuit name(args): ReturnType { ... }` is the on-chain entry
+  point; `assert(cond, "message")` is the invariant-checking primitive;
+  `disclose(x)` is required by the compiler before any witness-tainted value
+  can be written to the ledger, returned, or passed cross-contract — a
+  compiler-enforced rule, confirmed via the bboard contract's own
+  `owner = disclose(publicKey(localSecretKey(), ...))` line, not just
+  documented behavior.
+- Commitment pattern used in shipped Midnight code:
   `persistentHash<Vector<3, Bytes<32>>>([pad(32, "domain:prefix:"), a, b])` —
-  i.e. domain separation via a literal string prefix is a real, working idiom,
-  not a theoretical recommendation. We reuse this exact idiom for Warden's
-  mandate commitment instead of inventing a different hashing convention.
-- The **TypeScript Simulator pattern** (`CounterSimulator`, `BBoardSimulator` in
-  the official examples) wraps `new Contract<PrivateState>(witnesses)`, calls
-  `contract.initialState(createConstructorContext(privateState, coinPk))` to get
-  `{currentPrivateState, currentContractState, currentZswapLocalState}`, builds a
-  `CircuitContext` via `createCircuitContext(...)`, and then calls
-  `contract.impureCircuits.<name>(context, ...args)` which returns `{context, result}`.
-  `ledger(context.currentQueryContext.state)` decodes typed public state. Tests run
-  under **Vitest** against this simulator with **no Docker, no proof server, no
-  network** — this is the real, current, documented way official Midnight example
-  contracts are unit-tested, and it is what Warden's Phase 1/6 test suite uses.
-- Real dependency versions pinned in the current official `example-counter`
-  monorepo (`package.json`, fetched from `main`): `@midnight-ntwrk/compact-runtime@0.15.0`,
+  domain separation via a literal string prefix is a real, working idiom
+  there, which Warden reuses for its own mandate commitment rather than
+  inventing a different hashing convention.
+- The **TypeScript simulator pattern** (`CounterSimulator`, `BBoardSimulator`
+  in the official examples) wraps `new Contract<PrivateState>(witnesses)`,
+  calls `contract.initialState(createConstructorContext(privateState, coinPk))`
+  to get `{currentPrivateState, currentContractState, currentZswapLocalState}`,
+  builds a `CircuitContext` via `createCircuitContext(...)`, and calls
+  `contract.impureCircuits.<name>(context, ...args)`, which returns
+  `{context, result}`. `ledger(context.currentQueryContext.state)` decodes
+  typed public state. Tests run under Vitest against this simulator with no
+  Docker, no proof server, no network — the same methodology Midnight's own
+  example contracts use for unit tests, and what `packages/contracts`' and
+  `packages/sdk`'s test suites both use.
+- Dependency versions pinned in the current official `example-counter`
+  monorepo: `@midnight-ntwrk/compact-runtime@0.15.0`,
   `@midnight-ntwrk/midnight-js@^4.0.4` plus its provider packages
   (`-http-client-proof-provider`, `-indexer-public-data-provider`,
   `-level-private-state-provider`, `-node-zk-config-provider`), and the
-  `@midnight-ntwrk/wallet-sdk-*` family. Warden's `package.json` files pin to
-  these same versions rather than guessing at fresh ones, so the SDK layer is
-  wired against APIs that are known to exist today.
+  `@midnight-ntwrk/wallet-sdk-*` family. Warden's own `package.json` files
+  pin to matching versions rather than guessed ones.
 
-## Where the original research thesis was imprecise, and how we redesigned
+## Design decisions shaped by real Compact/Midnight constraints
 
-1. **"Native Zswap nullifiers for arbitrary application revocation."** Zswap
-   nullifiers are a coin-spending primitive inside the shielded-token protocol,
-   not an exposed general-purpose "revoke any application credential" API in
-   Compact. Warden's revocation is implemented as an **application-level**
-   revocation `Set<Bytes<32>>` on the contract's own public ledger. It gives the
-   identical externally-observable guarantee we need (a mandate commitment,
-   once published to the set, can never again satisfy `authorize`), but it is
-   **our contract's own state, not a base-layer cryptographic nullifier**, and
-   every doc/UI string in this project says so explicitly (see `docs/PRIVACY.md`
-   and the in-app "Protocol primitive vs. application construction" note).
-2. **Cross-contract composition for hierarchical delegation.** The Compact
+1. **Revocation is application-level state, not a native Zswap nullifier.**
+   Zswap nullifiers are a coin-spending primitive inside the shielded-token
+   protocol, not an exposed general-purpose "revoke any application
+   credential" API in Compact. Warden's revocation is a `Set<Bytes<32>>` on
+   the contract's own public ledger, giving the same externally-observable
+   guarantee (a mandate commitment, once published to the set, can never
+   again satisfy `authorize`) — but it is the contract's own state, not a
+   base-layer cryptographic nullifier, and every doc/UI string in this
+   project says so explicitly (see `docs/PRIVACY.md`).
+2. **Nested delegation lives inside one contract, not two.** The Compact
    reference documents that a circuit which calls a witness currently cannot
-   satisfy an external `contract` type — i.e., you cannot cleanly split
-   "mandate contract" and "sub-mandate contract" into two separately deployed,
-   privately-composing contracts today. Wave 1/2 therefore keep all mandate and
-   sub-mandate state inside **one** contract (nested by a `parentId` field)
-   instead of the originally-imagined multi-contract composition. This is a
-   real, current limitation, not a design preference — documented in
-   `docs/ARCHITECTURE.md` and `docs/THREAT-MODEL.md` as a Wave-3 open problem.
-3. **"Prove the agent performed a real-world action."** Unchanged from the
-   original thesis's own boundary (§1): out of scope. Confirmed there is no
-   Midnight-native oracle primitive in the current docs or SDK.
-4. **Cumulative spend tracking.** Compact circuits are bounded/stateless per
-   call — there is no way to "loop over history" inside a circuit. To let the
-   *public* ledger enforce a cumulative cap across many independent calls
-   without ever publishing the cap itself, Warden publishes a per-mandate
-   **cumulative spent counter** (an intentional, documented partial disclosure)
-   while the maximum/cap, asset policy, destination-category policy and
-   expiry stay in private witness state, reasserted against the mandate
-   commitment on every call. This is a deliberate privacy/enforceability
-   trade-off, not an oversight — it is called out by name in `docs/PRIVACY.md`.
+   satisfy an external `contract` type — a clean "mandate contract" /
+   "sub-mandate contract" split across two deployed contracts isn't
+   available today. Wave 2's delegation design (`docs/WAVE-2-DELEGATION-DESIGN.md`)
+   keeps all mandate and sub-mandate state inside **one** contract instead,
+   addressed by a `parentId` field.
+3. **Off-chain action verification is out of scope.** There is no
+   Midnight-native oracle primitive in the current docs or SDK; Warden
+   proves authorization, not real-world effect (see `docs/ARCHITECTURE.md` §7).
+4. **Cumulative spend is a commitment chain, not a history scan.** Compact
+   circuits are bounded and stateless per call — there is no way to "loop
+   over history" inside a circuit. To let the public ledger enforce a
+   cumulative cap across many independent calls without ever publishing the
+   cap itself, Warden publishes a per-mandate re-randomized spend commitment
+   while the cap, asset policy, destination-category policy, and (with one
+   exception — see below) expiry stay in private witness state, reasserted
+   against the mandate commitment on every call.
 
-## Live devnet: what actually worked, and the real blocker found
+## Block-time enforcement
 
-The user installed Docker Desktop (with WSL2 integration) so this could be
-tested for real rather than staying at the simulator level. What follows is
-the complete, honest result — including the point where it currently stops,
-root-caused precisely rather than left as a mystery.
+`authorize` and `createMandate` check expiry with `blockTimeLte`, a Compact
+standard-library primitive comparing the **ledger's own current block
+time** — not a caller-supplied one — against a given value:
 
-### What is fully verified, live, real
-
-- `infra/devnet/standalone.yml` — the real, official
-  `midnightntwrk/midnight-node:0.22.3`, `midnightntwrk/indexer-standalone:4.0.0`,
-  and `midnightntwrk/proof-server:8.0.3` images (topology and healthchecks
-  copied verbatim from `example-counter`'s own `standalone.yml`) — was pulled
-  and brought up successfully. All three containers reached a healthy,
-  request-serving state (the proof server's Docker healthcheck label lagged
-  behind its actual readiness during the ~40s one-time trusted-setup-parameter
-  download it does on first boot, but `curl http://localhost:6300/version`
-  confirmed it was genuinely serving requests throughout).
-- A real HD wallet (`infra/devnet/deploy-script/src/deploy-and-call.ts`) was
-  derived from the well-known local-devnet genesis seed — the same constant
-  `example-counter`'s own CLI uses for standalone mode
-  (`0000...0001`) — using the real `@midnight-ntwrk/wallet-sdk-hd` key
-  derivation across all three roles (Zswap/shielded, NightExternal/unshielded,
-  Dust), wired through a real `WalletFacade` (shielded + unshielded + dust
-  sub-wallets), and synced against the real running node over its real
-  WebSocket RPC.
-- That sync produced a **real, non-zero genesis balance**:
-  250,000,000,000,000 tNight (unshielded) and 1,250,000,000,000,000,000,000,000
-  DUST already available — i.e., wallet↔node↔indexer communication over the
-  current wire protocol is fully working, no faucet or manual funding needed.
-
-### Where it currently stops, and exactly why
-
-Submitting the actual `deployContract` call — which would generate a real ZK
-proof via the live proof server and post a real transaction to the node —
-fails, and the reason is a precisely root-caused **version-skew problem
-across the published `@midnight-ntwrk/*` package ecosystem**, not a Warden
-defect:
-
-1. **The current Compact compiler (0.34.0) generates an *async* circuit API**
-   (`impureCircuits.foo(...)` returns `Promise<CircuitResults<...>>`), which
-   requires `@midnight-ntwrk/compact-runtime@0.19.0` — confirmed empirically
-   earlier in this document (the whole simulator-testing methodology depends
-   on this).
-2. **The current *stable* `midnight-js` line (4.0.4, and 4.1.1) does not
-   support that runtime.** Checked directly against the npm registry:
-   `midnight-js-contracts@4.0.4` bundles `compact-js@2.5.0`, which depends on
-   `compact-runtime@0.15.0`; `midnight-js-protocol@4.1.1` (the 4.1.x line's
-   equivalent) bundles `compact-js@2.5.1`, which depends on
-   `compact-runtime@0.16.0`. Both predate the async API change. Attempting to
-   deploy a 0.34.0-compiled contract through `midnight-js@4.0.4` fails
-   immediately inside `midnight-js-contracts`' bundled `compact-js` with
-   `TypeError: Cannot read properties of undefined (reading 'ctor')` — the
-   two `compact-js` instances (our top-level one, needed to match our
-   contract; its nested one, needed to match its own internals) disagree
-   about the shape of a compiled contract.
-3. **The only published `midnight-js` line whose dependency chain actually
-   matches `compact-runtime@0.19.0` is `5.0.0-beta.*`** — confirmed via
-   `npm view @midnight-ntwrk/midnight-js-protocol@5.0.0-beta.7 dependencies`,
-   which resolves to `compact-runtime@0.19.0-rc.0` — but that same beta line
-   also pulls `@midnightntwrk/ledger-v9` and
-   `@midnightntwrk/onchain-runtime-v4` (note: a *different, non-hyphenated*
-   npm scope, `@midnightntwrk` rather than `@midnight-ntwrk` — a genuine,
-   easy-to-miss inconsistency in the ecosystem's own package naming). Our
-   devnet's Docker images are built for the stable `ledger-v8`/
-   `onchain-runtime-v3` line, so there is no confidence the beta SDK's wire
-   protocol even matches what `midnightntwrk/midnight-node:0.22.3` speaks —
-   this was not tested, to avoid compounding an already-identified mismatch
-   with a second, unverified one.
-4. **We also tried bridging the gap from the other direction**: recompiling
-   `warden.compact` with an older compiler (0.31.1, confirmed to still
-   produce the pre-async, synchronous circuit API compatible with
-   `compact-runtime@0.16.0`) and pointing it at `midnight-js@4.1.1`
-   specifically (`infra/devnet/deploy-script-legacy/`). This got substantially
-   further — past compilation, past `CompiledContract.make(...).pipe(
-   CompiledContract.withWitnesses(...), CompiledContract.withCompiledFileAssets(...))`,
-   past a `ledger-v8` WASM version mismatch (`wallet-sdk-dust-wallet@3.0.0`
-   expects `ledger-v8@^8.0.2`; upgrading to the mutually-consistent current
-   set — `wallet-sdk-facade@4.0.1` / `-dust-wallet@4.1.0` /
-   `-shielded@3.0.1` / `-unshielded-wallet@3.1.0`, all pinned to
-   `ledger-v8@^8.1.0` — fixed a `TypeError: expected instance of
-   DustParameters` WASM class-identity error) — and then hit a **real public
-   API removal**: `wallet-sdk-unshielded-wallet@2.1.0`'s
-   `InMemoryTransactionHistoryStorage` export (used by the reference CLI code
-   this project is otherwise following closely) is no longer part of
-   `3.1.0`'s public `exports` map at all. At that point we stopped rather
-   than reverse-engineer a second package's new, undocumented-to-us API
-   surface — this is a real, current, unresolved rough edge in the package
-   ecosystem, not something to paper over with a workaround whose correctness
-   we couldn't verify.
-
-### The honest conclusion
-
-**Deploying a contract compiled with the current (0.34.0) Compact compiler to
-a live Midnight devnet is not, as of 2026-09-07, a clean, drop-in operation
-with any single currently-published, mutually-consistent combination of
-`@midnight-ntwrk/*` packages we could find** — the compiler has moved ahead
-of the stable SDK line's `compact-runtime` pin, and the one SDK line that has
-caught up (`5.0.0-beta.*`) has itself moved ahead of the stable
-`ledger`/`onchain-runtime`/wallet-sdk line our devnet images are built
-against. This is a real, verified, root-caused finding — not a Warden defect,
-not a skill gap, and not something a different contract design would avoid.
-Everything *before* this point (Docker, the full devnet, real wallet sync,
-real genesis funds) is fully working proof that the infrastructure itself is
-sound; the gap is specifically in the current cross-package release
-alignment for the contract-deployment path.
-
-**What this does not affect:** the Wave 1 deliverable itself. `packages/contracts`
-stays on the current 0.34.0 compiler (correctly — that's the toolchain judges
-will actually be building against), and its 35 tests all exercise the real
-compiled circuit logic via the `@midnight-ntwrk/compact-runtime@0.19.0`
-simulator — the same methodology Midnight's own official example contracts
-use for testing, and the same one this document already described in detail
-above. `infra/devnet/deploy-script*` are kept as working, documented evidence
-of exactly how far live deployment gets today and exactly where and why it
-currently stops — useful for whoever revisits this once the ecosystem's
-package versions catch up to each other, not something to delete because it
-didn't reach 100%.
-
-## The block-time vulnerability (found by adversarial audit)
-
-`authorize` originally declared `currentTime: Uint<64>` as a plain circuit
-argument and asserted `currentTime <= ctx.policy.expiry`. Auditing the
-contract adversarially rather than re-reading it for prose accuracy surfaced
-the obvious problem: **nothing bound that argument to reality.** An agent
-generating its own proof supplies its own arguments; passing
-`currentTime = 0` (or any value `<= expiry`) satisfies the assertion
-regardless of the actual time, so mandate expiry was unenforceable by
-construction. This had shipped with 26 passing tests — every test happened
-to pass a plausible `currentTime`, so nothing caught it; passing tests are
-not evidence an invariant is real if the test never tries to violate it via
-the actual attacker-controlled input.
-
-**Finding the real primitive, not inventing one.** Rather than hand-rolling
-a workaround, we checked whether Compact has a trusted time source at all.
-`docs.midnight.network/develop/reference/compact/compact-std-library/` lists
-`blockTimeLt` / `blockTimeLte` / `blockTimeGt` / `blockTimeGte`, each
-`circuit blockTime<Cmp>(time: Uint<64>): Boolean`, comparing the **ledger's
-own current block time** — not a caller-supplied one — against the given
-value. Confirmed against the real compiler (0.34.0), not just the docs page:
-
-- Calling `blockTimeLte(expiry)` where `expiry` is witness-derived fails to
-  compile with a disclosure error — the compiler itself reports that the
-  call "might disclose the upper bound of the time being checked," meaning
-  the comparison value must become a public input. `disclose(expiry)` fixes
-  it. This is the mechanical reason `Policy.expiry` moved from private to
-  public (see `docs/PRIVACY.md`) — not a design preference.
+- `blockTimeLte(x)` requires `x` to be disclosed: passing a witness-derived
+  value directly fails to compile with a disclosure error (the compiler
+  reports that the call "might disclose the upper bound of the time being
+  checked"). `disclose(expiry)` resolves it. This is the mechanical reason
+  `Policy.expiry` is public (see `docs/PRIVACY.md`) — not a design
+  preference.
 - `@midnight-ntwrk/compact-runtime`'s `createCircuitContext(...)` takes an
-  optional 9th positional `time` argument (seconds); `blockTimeLte` reads
-  it live. Verified empirically: a circuit asserting `blockTimeLte(500)`
-  passes when the context is built with `time: 400` and fails when built
-  with `time: 600` — and, separately, that *mutating* an existing context's
-  `callContext.time` after construction has **no effect** (the check reads
-  from wherever the runtime actually resolves current time internally, not
-  that field) — only rebuilding via `createCircuitContext` with a new `time`
-  works. This is why `WardenSimulator` now builds a fresh `CircuitContext`
-  per call instead of threading one context forward, and why its
+  optional 9th positional `time` argument (seconds); `blockTimeLte` reads it
+  live at construction time — mutating an existing context's
+  `callContext.time` afterward has no effect, only rebuilding via
+  `createCircuitContext` with a new `time` does. This is why
+  `WardenSimulator` builds a fresh `CircuitContext` per call, and why its
   `createMandate`/`authorize`/`revoke` all take an optional `atTime` for
   deterministic tests.
 - Omitting `time` defaults to real wall-clock seconds
-  (`Math.floor(Date.now()/1000)`), confirmed by comparing runtime behavior
-  against `Date.now()` directly — this is why `packages/sdk`'s
-  `LocalSimulatorNetwork` needs no explicit time handling at all: it already
-  gets real current time by default, both in this simulator and in any real
-  deployed network.
+  (`Math.floor(Date.now()/1000)`), which is why `packages/sdk`'s
+  `LocalSimulatorNetwork` needs no explicit time handling: it already gets
+  real current time by default, in the simulator and in any real deployed
+  network alike.
 
-**Fix.** `authorize`'s `currentTime` parameter was removed entirely (there is
-no longer a value for a caller to lie about); both `authorize` and
-`createMandate` now assert `blockTimeLte(disclose(ctx.policy.expiry))`.
-`createMandate` gained a real "not already expired" check as a byproduct,
-which it never had (`expiry > 0` was the entire old check, useless against a
-past timestamp). See `docs/THREAT-MODEL.md`, "Vulnerabilities found and
-fixed," and `docs/ARCHITECTURE.md` §5b.
+See `docs/THREAT-MODEL.md`, "Block-time enforcement," and
+`docs/ARCHITECTURE.md` §5b for how this shapes `authorize`'s and
+`createMandate`'s assertions.
 
-## Bugs actually caught by running the stack, not just reasoning about it
+## Known implementation gotchas
 
-Kept here because "we tested it" should mean something — these are two real
-defects `packages/contracts`' and `packages/sdk`'s test suites did **not**
-catch (both suites passed the whole time), found only by exercising the full
-built stack the way a judge actually would:
+- **A mandate handoff must carry its real initial `spentNonce`.**
+  `createMandate`'s own `freshNonce` witness call decides the nonce behind a
+  mandate's *initial* spend commitment; a handoff that only carries
+  `MandateContext` leaves the agent guessing (`spentNonce: 0`), which fails
+  the agent's first `authorize` call with `StaleStateError`. See
+  `packages/sdk/src/client.ts`, `MandateHandoff.spentNonce`.
+- **`WardenError` subclasses need an explicit `name`.** `new.target.name`
+  works under Vitest and `next dev`, but a production bundler's minification
+  renames every error class, so `error.name` comes back mangled
+  (`"J"`, `"H"`, …) instead of `"PolicyViolationError"` /
+  `"MandateRevokedError"`, silently breaking any `error.name`-based
+  branching. Each `WardenError` subclass sets an explicit,
+  minification-proof `name` string instead — see `packages/sdk/src/errors.ts`.
+  Verifying this required building `apps/web` for production and curling
+  the actual `/api/*` routes, not just running the unit-test suites.
 
-1. **`MandateHandoff` missing the mandate's real initial `spentNonce`.**
-   `createMandate`'s own `freshNonce` witness call decides the nonce behind
-   a mandate's *initial* spend commitment; a naive handoff that only carries
-   `MandateContext` leaves the agent guessing (`spentNonce: 0`), which fails
-   the agent's very first `authorize` call with `StaleStateError`. Caught by
-   `packages/sdk/src/client.test.ts`'s two-real-client (not one colocated
-   session) test the first time it ran. Fixed by threading the real nonce
-   through `MandateHandoff` — see `packages/sdk/src/client.ts`.
-2. **`WardenError.name` via `new.target.name` breaks under a production
-   bundler.** Worked in every test (Vitest doesn't minify) and in `next dev`.
-   Broke the moment `apps/web` was built with `next build` and hit over real
-   HTTP: minification renamed every error class, so `error.name` came back
-   as a single mangled letter (`"J"`, `"H"`, …) instead of
-   `"PolicyViolationError"` / `"MandateRevokedError"`, silently breaking any
-   `error.name`-based branching (including this app's own `/api/authorize`
-   route). Caught by running `npm run build --workspace apps/web`, starting
-   the production server, and curling the actual `/api/*` routes — not by
-   any unit test. Fixed by giving each `WardenError` subclass an explicit,
-   minification-proof `name` string — see `packages/sdk/src/errors.ts`.
+## Local devnet
 
-Neither bug was visible from source review or from the unit-test suites
-alone; both required actually running the built artifact end-to-end. That is
-the reason `docs/DEMO.md` and this project's own verification process insist
-on curling the real running server rather than trusting `npm test` in
-isolation.
+A full local Midnight devnet (node + indexer + proof server) is available
+under `infra/devnet/` for real-network validation, separate from the
+simulator-based test suites:
 
-## Plan for Phase 1 (this session)
+- `infra/devnet/standalone.yml` brings up the real, official
+  `midnightntwrk/midnight-node:0.22.3`, `midnightntwrk/indexer-standalone:4.0.0`,
+  and `midnightntwrk/proof-server:8.0.3` images (topology and healthchecks
+  copied from `example-counter`'s own `standalone.yml`) via `docker compose`.
+  All three containers reach a healthy, request-serving state.
+- `infra/devnet/deploy-script/src/deploy-and-call.ts` derives a real HD
+  wallet from the well-known local-devnet genesis seed (the same constant
+  `example-counter`'s own CLI uses for standalone mode, `0000...0001`) using
+  `@midnight-ntwrk/wallet-sdk-hd`, wires a real `WalletFacade`, and syncs it
+  against the running node over its real WebSocket RPC — producing a real,
+  non-zero genesis balance (250,000,000,000,000 tNight, real DUST), i.e.
+  wallet↔node↔indexer communication over the current wire protocol works,
+  no faucet needed.
 
-Build and get compiling/passing under the **real** 0.34.0 compiler and a real
-Vitest simulator suite:
-`packages/contracts/src/warden.compact`, `packages/contracts/src/witnesses.ts`,
-`packages/contracts/src/test/warden-simulator.ts`,
-`packages/contracts/src/test/warden.test.ts`.
+### Where contract deployment currently stops, and why
+
+Submitting an actual `deployContract` call — generating a real ZK proof via
+the live proof server and posting a real transaction to the node — fails
+due to a version-skew problem across the published `@midnight-ntwrk/*`
+package ecosystem, not a Warden defect:
+
+1. The current Compact compiler (0.34.0) generates an *async* circuit API
+   (`impureCircuits.foo(...)` returns `Promise<CircuitResults<...>>`), which
+   requires `@midnight-ntwrk/compact-runtime@0.19.0`.
+2. The current *stable* `midnight-js` line does not support that runtime:
+   `midnight-js-contracts@4.0.4` bundles `compact-js@2.5.0`
+   (→ `compact-runtime@0.15.0`); `midnight-js-protocol@4.1.1` bundles
+   `compact-js@2.5.1` (→ `compact-runtime@0.16.0`). Both predate the async
+   API change. Deploying a 0.34.0-compiled contract through `midnight-js@4.0.4`
+   fails immediately inside its bundled `compact-js` with
+   `TypeError: Cannot read properties of undefined (reading 'ctor')` — two
+   `compact-js` instances disagreeing about the shape of a compiled contract.
+3. The only published `midnight-js` line whose dependency chain matches
+   `compact-runtime@0.19.0` is `5.0.0-beta.*`. As of `5.0.0-beta.8`, that
+   line's `midnight-js-protocol` now depends on **both**
+   `@midnightntwrk/ledger-v8@8.1.2` and `@midnightntwrk/ledger-v9@1.0.0-rc.4`
+   (note the non-hyphenated `@midnightntwrk` scope — a different npm scope
+   from `@midnight-ntwrk`, a real, easy-to-miss inconsistency in the
+   ecosystem's own naming) — a genuine improvement over earlier betas, which
+   depended on the v9 line only. Tested directly against this devnet
+   (`midnightntwrk/midnight-node:0.22.3`, built for `ledger-v8`): wallet
+   construction, node sync over the live WebSocket RPC, and real DUST
+   registration all work, confirming the wire protocol is compatible this
+   far. Three real bugs were found and fixed getting this far, each a
+   genuine defect in `infra/devnet/deploy-script`, not the ecosystem:
+   `CompiledContract.make`'s second argument must be the contract
+   *constructor* (`WardenContract.Contract`), not the whole module
+   namespace — passing the namespace compiles clean under `as any` but fails
+   at runtime deep inside `compact-js` with `context.ctor is not a
+   constructor`; the pipeline was also missing a `.withWitnesses(...)` step
+   entirely, masked by the same `as any`; and `midnight-js-contracts`'
+   version-tagged provider seams (new in this line) reject a raw
+   `{ balanceTx, submitTx, ... }` object with `SeamEraUnsupportedError`
+   unless it's built via `createWalletProvider`/`createMidnightProvider`
+   from `@midnight-ntwrk/midnight-js/types`, which declare `supportedEras`
+   correctly. Past all three: `deployContract`'s actual fee-balancing step
+   fails with `expected instance of LedgerParameters` inside
+   `@midnightntwrk/ledger-v9`'s WASM (`Transaction.feesWithMargin`), called
+   from `wallet-sdk-dust-wallet@4.1.0`'s internal
+   `TransactingCapabilityImplementation.calculateFee`. This is not something
+   `deploy-and-call.ts` constructs or passes — `wallet-sdk-dust-wallet`
+   syncs `ledgerParameters` itself from the live node
+   (`RunningV1Variant.js`'s `syncService.blockData().ledgerParameters`),
+   building it with `@midnight-ntwrk/ledger-v8` WASM bindings (per
+   `wallet-sdk-dust-wallet`'s own type imports), while the `Transaction`
+   object being fee-calculated is v9-native, produced by
+   `midnight-js-contracts@5.0.0-beta.8`'s deploy pipeline. Its bound
+   `.feesWithMargin` method belongs to the v9 WASM module and rejects a
+   `LedgerParameters` instance from the v8 module — a WASM class-identity
+   mismatch between two *different* packages (`wallet-sdk-dust-wallet` and
+   `midnight-js-contracts`) that neither Warden's code nor its own
+   dependency choices control. `wallet-sdk-dust-wallet@4.1.0` is the latest
+   published version as of this writing; there is no newer release that
+   might already resolve it.
+4. Bridging from the other direction — recompiling `warden.compact` with an
+   older compiler (0.31.1, producing the pre-async, synchronous circuit API
+   compatible with `compact-runtime@0.16.0`) and targeting `midnight-js@4.1.1`
+   specifically (`infra/devnet/deploy-script-legacy/`) — resolves the
+   version-skew problem entirely rather than just narrowing it. Past
+   compilation, past a `ledger-v8` WASM version mismatch (fixed by aligning
+   `wallet-sdk-facade`/`-dust-wallet`/`-shielded`/`-unshielded-wallet` to a
+   mutually consistent set pinned to `ledger-v8@^8.1.0`, applied via root
+   `package.json`'s `"overrides"` plus a full clean reinstall — a duplicate
+   WASM module instance is otherwise silently installed alongside the
+   pinned one, producing cryptic `"expected instance of X"` errors from
+   `wasm-bindgen`'s class-identity checks, not structural ones), past a real
+   public API removal (`wallet-sdk-unshielded-wallet@2.1.0`'s
+   `InMemoryTransactionHistoryStorage` export moved to
+   `@midnight-ntwrk/wallet-sdk-abstractions` in `3.1.0` and requires a schema
+   argument it didn't before — `NoOpTransactionHistoryStorage` from the same
+   package needs neither and is a drop-in fix), and past a genuine upstream
+   memory leak in `wallet-sdk-facade@4.0.1`/`wallet-sdk-dust-wallet@4.1.0`/
+   `wallet-sdk-shielded@3.0.1` during real-network wallet sync (unbounded
+   growth, ~7.6GB and still climbing after 17.5 minutes; fixed by bumping to
+   the next stable patch releases, `4.1.0`/`4.2.0`/`3.0.2`, after which
+   memory stayed flat at ~460–580MB for the full multi-hour sync) — this
+   combination deploys and runs the complete mandate lifecycle successfully,
+   with real ZK proofs and real transactions, on **both** the local devnet
+   and the real public Midnight Preprod network.
+
+**Local devnet, full lifecycle (`TARGET=local`):** deploy → `createMandate`
+→ `authorize` within cap (accepted) → `authorize` over cap (correctly
+rejected: `policy violation: amount exceeds mandate cap`) → `revoke` →
+`authorize` after revoke (correctly rejected: `mandate revoked`). All six
+steps produce real proofs via the local proof server and real transactions
+against the local node.
+
+**Live Midnight Preprod, full lifecycle (`TARGET=preprod`):** the same six
+steps, against the real public network (`rpc.preprod.midnight.network`,
+`indexer.preprod.midnight.network`), funded via the public faucet. A
+brand-new wallet's first sync against Preprod's block height (~2.55M at the
+time of this run) took roughly 3 hours 45 minutes — consistent with other
+teams' reports on the buildathon's public channel — with a local proof
+server for the ZK proving step throughout (proof generation and
+verification are always local, regardless of which network the transaction
+posts to; the proof server never handles private witness data over the
+network). Real, on-chain evidence from that run:
+
+| Step | Result |
+|---|---|
+| Contract address | `a61fb3417a82f6eff61e98e3ac50e759d916a86636f9ec25b9551375be8162bb` |
+| Mandate ID | `e77c6743bf8b89f0541edeaeaf13926223123baad3d14ae6a6c523e9b90d13bf` |
+| `createMandate` | tx `00c149d58e622dbbe8a20c6e326fd24c0219ba5e759e8d6c1bc72218ad9a579885`, block 2,549,815 |
+| `authorize` 120 (within cap) | AUTHORIZED — tx `00985974c7948e7d0720383d2b39db27162756dc2314c1c9645c026b6a7ef20a45`, block 2,549,825 |
+| `authorize` 99,999 (over cap) | correctly rejected: `policy violation: amount exceeds mandate cap` |
+| `revoke` | tx `00670f4349e16ec52092fd49fc8e217ac1247b632b16587c5338353fe085d74b91`, block 2,549,832 |
+| `authorize` 120 (after revoke) | correctly rejected: `mandate revoked` |
+
+Both runs use the current, security-fixed `warden.compact` source (the same
+`blockTimeLte` trusted-ledger-time logic in `packages/contracts/src/warden.compact`,
+not a weakened snapshot) — the older 0.31.1 compiler and the current 0.34.0
+compiler accept the same source unchanged, confirmed by compiling it under
+both. Reproduce with `TARGET=local npm start` or
+`TARGET=preprod npm start` from `infra/devnet/deploy-script-legacy/` (a
+funded `.preprod-seed` file is required for the latter — see that
+directory's own notes).
+
+**Conclusion.** Deploying a contract compiled with the current (0.34.0)
+Compact compiler directly through the newest `midnight-js@5.0.0-beta.*`
+line remains blocked by the WASM class-identity mismatch described in item
+3 above — that specific combination is not fixed and is not needed. The
+practical, proven path is compiling with the older 0.31.1 compiler against
+the stable `midnight-js@4.1.1` line, and that path now has genuine,
+reproducible evidence of a full mandate lifecycle — deploy, authorize,
+policy-cap enforcement, revoke, and post-revoke enforcement — with real
+proofs and real transactions on both a local devnet and the live public
+Preprod network.
+
+**What this does not affect:** the Wave 1 deliverable. `packages/contracts`
+stays on the current 0.34.0 compiler throughout, and its test suite
+exercises the real compiled circuit logic via the
+`@midnight-ntwrk/compact-runtime@0.19.0` simulator — the same methodology
+Midnight's own official example contracts use for testing. See
+`docs/WAVE-1-SPEC.md` §11 for the deployment-status summary and
+`README.md` §12 for how this is represented to judges.
+`infra/devnet/deploy-script*` are kept as working, documented evidence of
+both how the current-compiler pipeline behaves and how the proven
+older-compiler/stable-SDK path was validated end to end.
