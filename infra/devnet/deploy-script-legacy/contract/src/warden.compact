@@ -1,33 +1,17 @@
-// SNAPSHOT — compiled with Compact 0.31.1 for the SDK version-skew
-// experiment described in docs/IMPLEMENTATION-NOTES.md ("Live devnet").
-// Predates the block-time audit fix in packages/contracts/src/warden.compact
-// (this copy still takes a caller-supplied `currentTime`, since fixing that
-// wasn't the point of this experiment). Not the current design — see
-// packages/contracts/src/warden.compact for that, and docs/THREAT-MODEL.md
-// for the vulnerability this version has and the shipped one does not.
-//
-// Warden — privacy-preserving authorization protocol for autonomous agents.
-//
-// A principal grants an agent a mandate: a private policy (spending cap, asset,
-// action type, destination category, expiry, action-count limit). Only a
-// domain-separated commitment to that policy — the "mandate id" — is public.
-// An agent can `authorize` an action only by proving, in zero knowledge, that
-// it holds the private mandate context behind that public id and that the
-// requested action satisfies every clause of the policy. The principal (and
-// only the principal — proven the same way) can `revoke` a mandate; every
-// later `authorize` against a revoked id is rejected by the circuit itself,
-// not by application-layer discretion.
-//
-// See docs/ARCHITECTURE.md for the full design and docs/PRIVACY.md for the
-// exact public/private/derived classification of every field below.
+// Compiled here with Compact 0.31.1 rather than the 0.34.0 packages/contracts
+// uses, specifically so the generated circuit API matches the
+// compact-runtime version the *stable* midnight-js@4.1.1 line's dependency
+// chain actually ships with (see docs/IMPLEMENTATION-NOTES.md, "Live
+// devnet"). This is otherwise the exact same source as
+// packages/contracts/src/warden.compact — including the blockTimeLte
+// expiry fix — confirmed to compile identically under 0.31.1; nothing here
+// is a stripped-down or outdated copy.
 
 pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 
-// The mandate's terms. Entirely private: it never touches the ledger, and no
-// exported circuit returns it. Only `mandateId(...)`, a one-way commitment to
-// it, is ever public.
+// Private except `expiry`, which blockTimeLte requires to be public.
 struct Policy {
   maxAmount: Uint<64>;
   asset: Bytes<32>;
@@ -35,36 +19,23 @@ struct Policy {
   destinationCategory: Bytes<32>;
   expiry: Uint<64>;
   actionCountLimit: Uint<16>;
-  // Freshness for the mandate commitment. Must be sampled uniformly at random
-  // per mandate and never reused — see docs/THREAT-MODEL.md, "randomness reuse".
-  salt: Bytes<32>;
+  salt: Bytes<32>; // must be fresh per mandate; never reuse
 }
 
-// The full private bundle behind a public mandate id: the policy plus the
-// principal's and agent's key-commitments. Handed by the principal to the
-// agent out of band at mandate-creation time (see docs/ARCHITECTURE.md,
-// "capability handoff") — the contract itself never transmits it.
+// Private bundle behind a public mandate id. Handed to the agent out of band.
 struct MandateContext {
   principalPk: Bytes<32>;
   agentPk: Bytes<32>;
   policy: Policy;
 }
 
-// -- Public ledger state -----------------------------------------------------
-// registered / revoked / actionCount are commitment-keyed: every entry is
-// addressed by a mandate id (a hash), never by a principal or agent identity.
-// spentCommitment is an *opaque* running-total commitment, not a plaintext
-// amount — see docs/PRIVACY.md for exactly what this does and does not leak.
-
+// Keyed by mandate id, never by principal/agent identity.
 export ledger registered: Set<Bytes<32>>;
 export ledger revoked: Set<Bytes<32>>;
 export ledger spentCommitment: Map<Bytes<32>, Bytes<32>>;
 export ledger actionCount: Map<Bytes<32>, Counter>;
 
-// -- Witnesses (private, TypeScript-side, untrusted by the circuit) ---------
-// Every value these return is re-verified inside the circuits below before it
-// is relied on for anything security-relevant. See docs/THREAT-MODEL.md.
-
+// Witness output is untrusted; every value is re-verified below.
 witness principalSecret(id: Bytes<32>): Bytes<32>;
 witness agentSecret(id: Bytes<32>): Bytes<32>;
 witness mandateContextOf(id: Bytes<32>): MandateContext;
@@ -72,14 +43,9 @@ witness spentSoFar(id: Bytes<32>): Uint<64>;
 witness spentNonce(id: Bytes<32>): Bytes<32>;
 witness freshNonce(id: Bytes<32>): Bytes<32>;
 
-// -- Pure helpers (no ledger access, no witness calls) -----------------------
-
-// Exported (not just `pure`) alongside `mandateId` and `spendCommitment`
-// below so the SDK can derive key-commitments and spend commitments
-// client-side using the exact same, compiler-verified implementation the
-// circuits check against — never a hand-reimplemented hash that could
-// silently drift from it.
-export circuit pkOf(secret: Bytes<32>): Bytes<32> {
+// Domain-separated via string prefixes. Exported so the SDK can derive
+// these client-side using the same implementation the circuits check against.
+export pure circuit pkOf(secret: Bytes<32>): Bytes<32> {
   return persistentHash<Vector<2, Bytes<32>>>([pad(32, "warden:pk:"), secret]);
 }
 
@@ -96,10 +62,7 @@ pure circuit policyHash(policy: Policy): Bytes<32> {
   ]);
 }
 
-// The mandate id: a domain-separated commitment binding the principal, the
-// agent, and every policy clause together. Exported (not just `pure`) so the
-// SDK can compute it client-side before a mandate is ever created on-chain.
-export circuit mandateId(ctx: MandateContext): Bytes<32> {
+export pure circuit mandateId(ctx: MandateContext): Bytes<32> {
   return persistentHash<Vector<4, Bytes<32>>>([
     pad(32, "warden:mandate:"),
     ctx.principalPk,
@@ -108,11 +71,8 @@ export circuit mandateId(ctx: MandateContext): Bytes<32> {
   ]);
 }
 
-// An opaque commitment to a running spend total. Chained with a fresh nonce
-// on every update so consecutive on-chain values are unlinkable — an observer
-// sees that *a* mandate's spend state changed, never by how much, and never
-// the mandate's cap. See docs/PRIVACY.md, "spend commitment chaining".
-export circuit spendCommitment(total: Uint<64>, nonce: Bytes<32>): Bytes<32> {
+// Re-randomized on every update so on-chain values are unlinkable.
+export pure circuit spendCommitment(total: Uint<64>, nonce: Bytes<32>): Bytes<32> {
   return persistentHash<Vector<3, Bytes<32>>>([
     pad(32, "warden:spent:"),
     total as Field as Bytes<32>,
@@ -120,12 +80,7 @@ export circuit spendCommitment(total: Uint<64>, nonce: Bytes<32>): Bytes<32> {
   ]);
 }
 
-// -- Protocol circuits --------------------------------------------------------
-
-// Registers a new mandate. Callable only by whoever holds the private
-// MandateContext behind `id` *and* can prove they are its principal (not its
-// agent — see `pkOf(principalSecret(...))`), so an id alone is never enough
-// to create or claim a mandate.
+// Registers a new mandate under its commitment id.
 export circuit createMandate(id: Bytes<32>): [] {
   const pid = disclose(id);
   assert(!registered.member(pid), "mandate already exists");
@@ -134,7 +89,7 @@ export circuit createMandate(id: Bytes<32>): [] {
   assert(mandateId(ctx) == pid, "mandate context does not match its public id");
   assert(pkOf(principalSecret(pid)) == ctx.principalPk, "caller is not the principal for this mandate");
   assert(ctx.policy.actionCountLimit > 0, "action count limit must be positive");
-  assert(ctx.policy.expiry > 0, "expiry must be set");
+  assert(blockTimeLte(disclose(ctx.policy.expiry)), "expiry must be in the future");
 
   registered.insert(pid);
   actionCount.insert(pid, default<Counter>);
@@ -144,19 +99,13 @@ export circuit createMandate(id: Bytes<32>): [] {
   spentCommitment.insert(pid, initCommit);
 }
 
-// The enforcement circuit. Succeeds only if the caller holds the mandate
-// context, is its registered agent, the mandate is neither expired nor
-// revoked, the requested action matches every policy clause, the action-count
-// limit is not exhausted, and the new cumulative spend still fits the cap.
-// Every one of those is a circuit-level `assert`, not a UI check — a proof
-// simply cannot be constructed if any of them is false.
+// Authorizes an action and advances the spend commitment.
 export circuit authorize(
   id: Bytes<32>,
   requestedAmount: Uint<64>,
   requestedAsset: Bytes<32>,
   requestedActionType: Bytes<32>,
-  requestedDestinationCategory: Bytes<32>,
-  currentTime: Uint<64>
+  requestedDestinationCategory: Bytes<32>
 ): [] {
   const pid = disclose(id);
   assert(registered.member(pid), "unknown mandate");
@@ -166,7 +115,7 @@ export circuit authorize(
   assert(mandateId(ctx) == pid, "mandate context does not match its public id");
   assert(pkOf(agentSecret(pid)) == ctx.agentPk, "caller is not the authorized agent for this mandate");
 
-  assert(currentTime <= ctx.policy.expiry, "mandate expired");
+  assert(blockTimeLte(disclose(ctx.policy.expiry)), "mandate expired");
   assert(requestedAsset == ctx.policy.asset, "asset not permitted by mandate");
   assert(requestedActionType == ctx.policy.actionType, "action type not permitted by mandate");
   assert(requestedDestinationCategory == ctx.policy.destinationCategory, "destination not permitted by mandate");
@@ -189,11 +138,7 @@ export circuit authorize(
   actionCount.lookup(pid).increment(1);
 }
 
-// Revocation. Gated on the *principal's* secret specifically (never the
-// agent's) — see the `pkOf(principalSecret(...))` assertion, which is the
-// entire access-control mechanism here. Once `revoked` contains `pid`, no
-// future `authorize` call against it can ever succeed again: there is no
-// "un-revoke" circuit, by design (see docs/THREAT-MODEL.md).
+// Permanently revokes a mandate.
 export circuit revoke(id: Bytes<32>): [] {
   const pid = disclose(id);
   assert(registered.member(pid), "unknown mandate");

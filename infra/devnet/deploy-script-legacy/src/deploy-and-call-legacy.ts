@@ -8,6 +8,7 @@
 // sequence — the only difference is which compiled contract and which
 // midnight-js version it targets.
 
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Buffer } from "node:buffer";
@@ -29,7 +30,11 @@ import { WalletFacade } from "@midnight-ntwrk/wallet-sdk-facade";
 import { DustWallet } from "@midnight-ntwrk/wallet-sdk-dust-wallet";
 import { HDWallet, Roles } from "@midnight-ntwrk/wallet-sdk-hd";
 import { ShieldedWallet } from "@midnight-ntwrk/wallet-sdk-shielded";
-import { createKeystore, InMemoryTransactionHistoryStorage, PublicKey, UnshieldedWallet } from "@midnight-ntwrk/wallet-sdk-unshielded-wallet";
+import { createKeystore, PublicKey, UnshieldedWallet } from "@midnight-ntwrk/wallet-sdk-unshielded-wallet";
+// InMemoryTransactionHistoryStorage left wallet-sdk-unshielded-wallet's exports between 2.1.0 and
+// 3.1.0 (now lives in wallet-sdk-abstractions, and needs a schema argument this script doesn't
+// need). NoOpTransactionHistoryStorage needs neither — this script never reads transaction history.
+import { NoOpTransactionHistoryStorage } from "@midnight-ntwrk/wallet-sdk-abstractions";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- local legacy-compiled module, no published types package
 import * as WardenContract from "../contract/src/managed/contract/index.js";
@@ -38,19 +43,44 @@ import { emptyWardenPrivateState, withMandate, idHex, type WardenPrivateState, t
 // @ts-expect-error: needed to enable WebSocket usage through apollo, same as the reference CLI
 globalThis.WebSocket = WebSocket;
 
-const GENESIS_MINT_WALLET_SEED = "0000000000000000000000000000000000000000000000000000000000000001";
+// TARGET=preprod npm run start points this same script at the real public
+// Preprod network instead of the local devnet — everything else (contract,
+// wallet-building logic, demo sequence) is identical either way. The proof
+// server is *always* local regardless of target: Midnight's own docs are
+// explicit that it "runs locally... because it handles your private data" —
+// see docs/IMPLEMENTATION-NOTES.md.
+const TARGET = process.env.TARGET === "preprod" ? "preprod" : "local";
+
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
 const zkConfigPath = path.resolve(currentDir, "..", "contract", "src", "managed");
 const privateStateId = "wardenPrivateStateLegacy";
 
-setNetworkId("undeployed");
+const GENESIS_MINT_WALLET_SEED = "0000000000000000000000000000000000000000000000000000000000000001";
+// A real, freshly-generated seed for Preprod — the well-known genesis seed
+// above only has funds on a fresh *local* devnet; reusing a publicly-known
+// seed on a real network would be a shared, valueless address. Generated
+// once with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`,
+// kept only in this local, gitignored file. See print-preprod-address.ts.
+const PREPROD_SEED_PATH = path.resolve(currentDir, "..", ".preprod-seed");
+const seed =
+  TARGET === "preprod" ? fs.readFileSync(PREPROD_SEED_PATH, "utf8").trim() : GENESIS_MINT_WALLET_SEED;
 
-const config = {
-  indexer: "http://127.0.0.1:8088/api/v3/graphql",
-  indexerWS: "ws://127.0.0.1:8088/api/v3/graphql/ws",
-  node: "http://127.0.0.1:9944",
-  proofServer: "http://127.0.0.1:6300"
-};
+setNetworkId(TARGET === "preprod" ? "preprod" : "undeployed");
+
+const config =
+  TARGET === "preprod"
+    ? {
+        indexer: "https://indexer.preprod.midnight.network/api/v4/graphql",
+        indexerWS: "wss://indexer.preprod.midnight.network/api/v4/graphql/ws",
+        node: "https://rpc.preprod.midnight.network",
+        proofServer: "http://127.0.0.1:6300"
+      }
+    : {
+        indexer: "http://127.0.0.1:8088/api/v3/graphql",
+        indexerWS: "ws://127.0.0.1:8088/api/v3/graphql/ws",
+        node: "http://127.0.0.1:9944",
+        proofServer: "http://127.0.0.1:6300"
+      };
 
 async function withStatus<T>(message: string, fn: () => Promise<T>): Promise<T> {
   process.stdout.write(`  … ${message}`);
@@ -77,7 +107,7 @@ const deriveKeysFromSeed = (seed: string) => {
 };
 
 async function buildWallet() {
-  const keys = deriveKeysFromSeed(GENESIS_MINT_WALLET_SEED);
+  const keys = deriveKeysFromSeed(seed);
   const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(keys[Roles.Zswap]);
   const dustSecretKey = ledger.DustSecretKey.fromSeed(keys[Roles.Dust]);
   const unshieldedKeystore = createKeystore(keys[Roles.NightExternal], getNetworkId());
@@ -86,7 +116,7 @@ async function buildWallet() {
     indexerClientConnection: { indexerHttpUrl: config.indexer, indexerWsUrl: config.indexerWS },
     provingServerUrl: new URL(config.proofServer),
     relayURL: new URL(config.node.replace(/^http/, "ws")),
-    txHistoryStorage: new InMemoryTransactionHistoryStorage(),
+    txHistoryStorage: new NoOpTransactionHistoryStorage(),
     costParameters: { additionalFeeOverhead: 300_000_000_000_000n, feeBlocksMargin: 5 }
   };
   const wallet = await WalletFacade.init({
@@ -100,6 +130,47 @@ async function buildWallet() {
 }
 
 const waitForSync = (wallet: WalletFacade) => Rx.firstValueFrom(wallet.state().pipe(Rx.throttleTime(2_000), Rx.filter((s) => s.isSynced)));
+
+// Only relevant on Preprod: the local devnet's genesis wallet starts funded
+// and pre-registered for dust generation, but a freshly generated Preprod
+// wallet starts at zero and needs both a real faucet transfer and a real
+// on-chain dust-registration transaction before it can pay any fees itself.
+const waitForFunds = (wallet: WalletFacade): Promise<bigint> =>
+  Rx.firstValueFrom(
+    wallet.state().pipe(
+      Rx.throttleTime(5_000),
+      Rx.filter((s) => s.isSynced),
+      Rx.map((s) => s.unshielded.balances[unshieldedToken().raw] ?? 0n),
+      Rx.filter((b) => b > 0n)
+    )
+  );
+
+async function registerForDustGeneration(wallet: WalletFacade, unshieldedKeystore: ReturnType<typeof createKeystore>) {
+  const state = await Rx.firstValueFrom(wallet.state().pipe(Rx.filter((s) => s.isSynced)));
+  if (state.dust.availableCoins.length > 0 && state.dust.balance(new Date()) > 0n) {
+    log(`dust already available (${state.dust.balance(new Date())})`);
+    return;
+  }
+  const nightUtxos = state.unshielded.availableCoins.filter((c: any) => c.meta?.registeredForDustGeneration !== true);
+  if (nightUtxos.length > 0) {
+    await withStatus(`registering ${nightUtxos.length} NIGHT UTXO(s) for dust generation`, async () => {
+      const recipe = await wallet.registerNightUtxosForDustGeneration(nightUtxos, unshieldedKeystore.getPublicKey(), (payload) =>
+        unshieldedKeystore.signData(payload)
+      );
+      const finalized = await wallet.finalizeRecipe(recipe);
+      await wallet.submitTransaction(finalized);
+    });
+  }
+  await withStatus("waiting for dust to generate", () =>
+    Rx.firstValueFrom(
+      wallet.state().pipe(
+        Rx.throttleTime(3_000),
+        Rx.filter((s) => s.isSynced),
+        Rx.filter((s) => s.dust.balance(new Date()) > 0n)
+      )
+    )
+  );
+}
 
 async function createWalletAndMidnightProvider(ctx: Awaited<ReturnType<typeof buildWallet>>): Promise<WalletProvider & MidnightProvider> {
   const state = await Rx.firstValueFrom(ctx.wallet.state().pipe(Rx.filter((s) => s.isSynced)));
@@ -125,12 +196,18 @@ async function createWalletAndMidnightProvider(ctx: Awaited<ReturnType<typeof bu
 }
 
 async function main() {
-  console.log("\nWarden — live devnet validation (legacy SDK line, compiler 0.31.1)\n====================================================================\n");
+  console.log(
+    `\nWarden — live ${TARGET === "preprod" ? "Preprod" : "devnet"} validation (legacy SDK line, compiler 0.31.1)\n====================================================================\n`
+  );
 
-  const ctx = await withStatus("building genesis wallet", buildWallet);
+  const ctx = await withStatus(TARGET === "preprod" ? "building Preprod wallet" : "building genesis wallet", buildWallet);
   await withStatus("syncing with node", () => waitForSync(ctx.wallet));
-  const balance = await Rx.firstValueFrom(ctx.wallet.state().pipe(Rx.map((s) => s.unshielded.balances[unshieldedToken().raw] ?? 0n)));
-  log(`unshielded balance: ${balance.toLocaleString()} tNight`);
+  const balance0 = await Rx.firstValueFrom(ctx.wallet.state().pipe(Rx.map((s) => s.unshielded.balances[unshieldedToken().raw] ?? 0n)));
+  log(`unshielded balance: ${balance0.toLocaleString()} tNight`);
+  if (balance0 === 0n) {
+    await withStatus("waiting for faucet funds", () => waitForFunds(ctx.wallet));
+  }
+  await registerForDustGeneration(ctx.wallet, ctx.unshieldedKeystore);
 
   const walletAndMidnightProvider = await createWalletAndMidnightProvider(ctx);
   const zkConfigProvider = new NodeZkConfigProvider(zkConfigPath);
@@ -150,7 +227,10 @@ async function main() {
     midnightProvider: walletAndMidnightProvider
   };
 
-  const compiledContract = CompiledContract.make("warden", WardenContract as any).pipe(
+  // CompiledContract.make's 2nd argument is the contract constructor itself, not the whole
+  // module namespace — passing the namespace compiles under `as any` but fails at runtime with
+  // "context.ctor is not a constructor" (there's no real class behind a namespace object).
+  const compiledContract = CompiledContract.make("warden", (WardenContract as any).Contract).pipe(
     CompiledContract.withWitnesses(witnesses as any),
     CompiledContract.withCompiledFileAssets(zkConfigPath)
   );
@@ -195,7 +275,50 @@ async function main() {
     log(`  tx ${finalized.public.txId} in block ${finalized.public.blockHeight}`);
   });
 
-  console.log("\n✓ Live devnet validation (legacy SDK line) complete.\n");
+  // Fold the real freshNonce the circuit actually drew into our local record,
+  // exactly as packages/sdk's client.ts does for the simulator backend.
+  let ps = (await providers.privateStateProvider.get(privateStateId)) as WardenPrivateState;
+  const afterCreate = ps.mandates[idHex(id)];
+  if (afterCreate?.pendingNonce) {
+    ps = withMandate(ps, id, { ...afterCreate, spentTotal: 0n, spentNonce: afterCreate.pendingNonce, pendingNonce: undefined });
+    await providers.privateStateProvider.set(privateStateId, ps);
+  }
+
+  await withStatus("authorize 120 (within cap — expect AUTHORIZED)", async () => {
+    const finalized = await (deployed as any).callTx.authorize(id, 120n, policy.asset, policy.actionType, policy.destinationCategory);
+    log(`  tx ${finalized.public.txId} in block ${finalized.public.blockHeight}`);
+  });
+  ps = (await providers.privateStateProvider.get(privateStateId)) as WardenPrivateState;
+  const afterAuth = ps.mandates[idHex(id)];
+  if (afterAuth?.pendingNonce) {
+    ps = withMandate(ps, id, { ...afterAuth, spentTotal: afterAuth.spentTotal + 120n, spentNonce: afterAuth.pendingNonce, pendingNonce: undefined });
+    await providers.privateStateProvider.set(privateStateId, ps);
+  }
+
+  try {
+    await withStatus("authorize 99999 (over cap — expect BLOCKED)", async () => {
+      await (deployed as any).callTx.authorize(id, 99_999n, policy.asset, policy.actionType, policy.destinationCategory);
+    });
+    log("  !! unexpectedly succeeded");
+  } catch (e) {
+    log(`  correctly rejected: ${(e as Error).message.split("\n")[0]}`);
+  }
+
+  await withStatus("revoke", async () => {
+    const finalized = await (deployed as any).callTx.revoke(id);
+    log(`  tx ${finalized.public.txId} in block ${finalized.public.blockHeight}`);
+  });
+
+  try {
+    await withStatus("authorize 120 after revoke (expect BLOCKED)", async () => {
+      await (deployed as any).callTx.authorize(id, 120n, policy.asset, policy.actionType, policy.destinationCategory);
+    });
+    log("  !! unexpectedly succeeded");
+  } catch (e) {
+    log(`  correctly rejected: ${(e as Error).message.split("\n")[0]}`);
+  }
+
+  console.log("\n✓ Live devnet validation (legacy SDK line) complete — full mandate lifecycle, real proofs, real transactions.\n");
   process.exit(0);
 }
 
