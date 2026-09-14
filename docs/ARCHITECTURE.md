@@ -168,11 +168,10 @@ docs/
   channel (conceptually similar to a Zswap output's optional ciphertext) —
   named explicitly as a Wave 2 hardening item, not silently assumed solved.
   The handoff also has to carry the mandate's real initial `spentNonce` (the
-  nonce `createMandate`'s own `freshNonce` witness call happened to draw),
-  not a guessed/zero placeholder — this was caught as a genuine, reproducible
-  `StaleStateError` in `packages/sdk`'s own end-to-end test the first time
-  the two-client flow was actually run, not something worked out on paper in
-  advance. See `packages/sdk/src/client.ts`, `MandateHandoff.spentNonce`.
+  nonce `createMandate`'s own `freshNonce` witness call drew) rather than a
+  guessed or zero placeholder, or the agent's first `authorize` call fails
+  with `StaleStateError`. See `packages/sdk/src/client.ts`,
+  `MandateHandoff.spentNonce`.
 
 ## 8b. Known non-guarantees
 

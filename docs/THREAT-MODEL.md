@@ -24,18 +24,18 @@ This file is not a description of theoretical security; where something is
   (e.g. why the action-count limit is a fixed `Uint<16>`, why cumulative
   spend uses a re-committed running total rather than a history scan).
 
-## Vulnerabilities found and fixed by a production audit
+## Block-time enforcement: why expiry uses ledger time, not caller input
 
-**Block-time forgery (critical, fixed).** `authorize` used to take
-`currentTime: Uint<64>` as a plain circuit argument and assert
-`currentTime <= ctx.policy.expiry`. Nothing tied that argument to reality —
-an agent could pass any value it liked, so expiry was unenforceable by
-construction; the check only ever validated a relationship between two
-values the same party controlled. Fixed by removing the argument and using
-the Compact standard library's `blockTimeLte`, which is evaluated against
-the ledger's own block time. Cost: `blockTimeLte`'s argument must be public,
-so `Policy.expiry` is now disclosed (see `docs/PRIVACY.md`); every other
-field is unaffected. Full account: `docs/IMPLEMENTATION-NOTES.md`. Tests:
+`authorize` does not take a `currentTime` argument from the caller. An
+earlier version did, asserting `currentTime <= ctx.policy.expiry` — nothing
+tied that argument to reality, so an agent could pass any value it liked and
+expiry was unenforceable by construction; the check only ever validated a
+relationship between two values the same party controlled. The current
+implementation uses the Compact standard library's `blockTimeLte`, which is
+evaluated against the ledger's own block time instead. Cost:
+`blockTimeLte`'s argument must be public, so `Policy.expiry` is disclosed
+(see `docs/PRIVACY.md`); every other field is unaffected. Full technical
+account: `docs/IMPLEMENTATION-NOTES.md`. Tests:
 `authorize — block-time expiry enforcement` (four tests, including exact
 boundary in both directions) and `createMandate > rejects an expiry that has
 already passed` / `> accepts an expiry exactly at the current block time`.

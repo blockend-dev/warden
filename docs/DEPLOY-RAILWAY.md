@@ -85,7 +85,9 @@ genuinely running the compiled circuit, not just serving a static page.
   replica count is 1 (step 5) — this is the one setting that actually
   matters for correctness here.
 
-## After it's live
+## Current live deployment
 
-Send me the URL and I'll add it to `README.md` and `docs/DEMO-SCRIPT.md` so
-judges have a one-click link instead of only local-run instructions.
+**[wardenweb-production.up.railway.app](https://wardenweb-production.up.railway.app/)** —
+deployed via this exact procedure, linked from `README.md` and
+`docs/DEMO-SCRIPT.md`. Redeploying from a fresh Railway project follows the
+same steps above.

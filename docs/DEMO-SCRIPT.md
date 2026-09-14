@@ -74,9 +74,9 @@ sequence just performed, unedited.
   and run `npm run test --workspace packages/contracts` on camera — 36
   passing, including named adversarial cases (wrong agent, forged context,
   replay, cross-mandate substitution).
-- Briefly show the SDK snippet from [`README.md`](../README.md) §9 and the
-  agent-adapter snippet from §10 — make clear the frontend is a consumer of
-  this SDK, not a separate implementation.
+- Briefly show the SDK and agent-adapter snippets from [`README.md`](../README.md) §8 —
+  make clear the frontend is a consumer of this SDK, not a separate
+  implementation.
 - Mention Wave 2: [`docs/WAVE-2-DELEGATION-DESIGN.md`](WAVE-2-DELEGATION-DESIGN.md)
   — nested delegation (Principal → Agent → Sub-agent) has a full protocol
   design and threat model already written, not implemented.

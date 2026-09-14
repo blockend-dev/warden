@@ -1,9 +1,8 @@
 # Warden — Privacy Review
 
-Every datum Warden touches, classified, with who can see it and why. This is
-the diagram from project instructions rendered as a table because a table is
-more auditable than a picture for a list this exact — `docs/DEMO.md` has the
-one-diagram version for the live walkthrough.
+Every datum Warden touches, classified, with who can see it and why, in
+table form rather than a diagram because a table is more auditable for a
+list this exact — `docs/DEMO.md` has the one-diagram version.
 
 Legend: **PUBLIC** = on the ledger, any observer sees it. **PRIVATE** = never
 leaves the holder's machine as plaintext. **SELECTIVE** = disclosed only to a
