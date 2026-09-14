@@ -1,13 +1,17 @@
 # Local Midnight devnet: node + indexer + proof server, all standalone
-# (no public testnet, no faucet needed). Image tags, healthchecks, and
-# service topology are taken directly from the official
-# `midnightntwrk/example-counter` reference project (`counter-cli/standalone.yml`,
-# fetched 2026-09-07 — see docs/IMPLEMENTATION-NOTES.md) rather than
-# hand-assembled, so they're the ones Midnight's own examples are actually
-# tested against. One deliberate change from the original: ports are pinned
-# to fixed host ports (6300/8088/9944) instead of random ones, since nothing
-# else on this machine needs to share them and fixed ports make the URLs
-# below (and any manual curl/debugging) predictable.
+# (no public testnet, no faucet needed). Healthchecks and service topology
+# are taken from the official `midnightntwrk/example-counter` reference
+# project (`counter-cli/standalone.yml`, fetched 2026-09-07). Ports are
+# pinned to fixed host ports (6300/8088/9944) instead of random ones, since
+# nothing else on this machine needs to share them.
+#
+# node/indexer versions pinned back to the original example-counter-matched
+# tags (0.22.3 / 4.0.0) on 2026-09-13, after a detour through newer tags
+# (1.0.2 / 4.3.7 / 4.4.0-rc.2) while chasing a @midnightntwrk/wallet-sdk
+# canary-line attempt: the STABLE wallet-sdk-* line (used by
+# infra/devnet/deploy-script-legacy) is what these original versions were
+# actually validated against, and the newer indexer breaks its sync queries
+# in the opposite direction. See docs/IMPLEMENTATION-NOTES.md.
 #
 # Usage: docker compose -f infra/devnet/standalone.yml --env-file infra/devnet/standalone.env up
 services:
