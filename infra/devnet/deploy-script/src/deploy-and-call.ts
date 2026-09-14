@@ -35,15 +35,29 @@ import { httpClientProofProvider } from "@midnight-ntwrk/midnight-js-http-client
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { NodeZkConfigProvider } from "@midnight-ntwrk/midnight-js-node-zk-config-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
-import { type MidnightProvider, type WalletProvider } from "@midnight-ntwrk/midnight-js/types";
-import { WalletFacade } from "@midnight-ntwrk/wallet-sdk-facade";
-import { DustWallet } from "@midnight-ntwrk/wallet-sdk-dust-wallet";
-import { HDWallet, Roles } from "@midnight-ntwrk/wallet-sdk-hd";
-import { ShieldedWallet } from "@midnight-ntwrk/wallet-sdk-shielded";
-import { createKeystore, InMemoryTransactionHistoryStorage, PublicKey, UnshieldedWallet } from "@midnight-ntwrk/wallet-sdk-unshielded-wallet";
+import { createMidnightProvider, createWalletProvider, type MidnightProvider, type WalletProvider } from "@midnight-ntwrk/midnight-js/types";
+// All wallet-sdk-* packages moved from the @midnight-ntwrk scope (used above for ledger-v8,
+// compact-js and midnight-js, which have not moved) to the unified, non-hyphenated
+// @midnightntwrk/wallet-sdk barrel package — this is the only combination in which
+// wallet-sdk-dust-wallet's fee calculation correctly handles a ledger-v9-shaped transaction
+// (midnight-js-contracts@5.0.0-beta.8 builds v9 transactions internally); the last
+// @midnight-ntwrk-scoped wallet-sdk-dust-wallet release still assumed ledger-v8 throughout and
+// threw `expected instance of LedgerParameters` deep inside @midnightntwrk/ledger-v9's WASM the
+// moment it tried to fee-balance one. See docs/IMPLEMENTATION-NOTES.md.
+import {
+  WalletFacade,
+  DustWallet,
+  HDWallet,
+  Roles,
+  ShieldedWallet,
+  createKeystore,
+  PublicKey,
+  UnshieldedWallet,
+  NoOpTransactionHistoryStorage
+} from "@midnightntwrk/wallet-sdk";
 
 import * as WardenContract from "@warden/contracts";
-import { emptyWardenPrivateState, withMandate, idHex, type WardenPrivateState, type MandateRecord } from "@warden/contracts";
+import { emptyWardenPrivateState, withMandate, idHex, witnesses, type WardenPrivateState, type MandateRecord } from "@warden/contracts";
 
 // Required for GraphQL subscriptions (wallet sync) to work in Node.js
 // @ts-expect-error: needed to enable WebSocket usage through apollo, same as the reference CLI
@@ -101,7 +115,7 @@ const buildShieldedConfig = () => ({
 const buildUnshieldedConfig = () => ({
   networkId: getNetworkId(),
   indexerClientConnection: { indexerHttpUrl: config.indexer, indexerWsUrl: config.indexerWS },
-  txHistoryStorage: new InMemoryTransactionHistoryStorage()
+  txHistoryStorage: new NoOpTransactionHistoryStorage()
 });
 const buildDustConfig = () => ({
   networkId: getNetworkId(),
@@ -115,16 +129,24 @@ async function buildWallet() {
   const keys = deriveKeysFromSeed(GENESIS_MINT_WALLET_SEED);
   const shieldedSecretKeys = ledger.ZswapSecretKeys.fromSeed(keys[Roles.Zswap]);
   const dustSecretKey = ledger.DustSecretKey.fromSeed(keys[Roles.Dust]);
-  const unshieldedKeystore = createKeystore(keys[Roles.NightExternal], getNetworkId());
+  // createKeystore now takes a typed `UnshieldedSecretKey` ({ kind, secret }), not the raw
+  // derived Uint8Array HDWallet.deriveKeysAt returns — 'schnorr' because Roles.NightExternal is
+  // the native (non-ECDSA) unshielded role; Roles.EcdsaUnshielded is the separate ECDSA one.
+  const unshieldedKeystore = createKeystore({ kind: "schnorr", secret: keys[Roles.NightExternal] }, getNetworkId());
 
   const walletConfig = { ...buildShieldedConfig(), ...buildUnshieldedConfig(), ...buildDustConfig() };
   const wallet = await WalletFacade.init({
     configuration: walletConfig,
-    shielded: (cfg) => ShieldedWallet(cfg).startWithSecretKeys(shieldedSecretKeys),
+    // The shielded wallet now spans the ledger-v8/v9 fork and derives both epochs' secret keys
+    // itself from one seed (startWithSecretKeys, which took only a v8 key, no longer exists).
+    shielded: (cfg) => ShieldedWallet(cfg).startWithSeed(keys[Roles.Zswap]),
     unshielded: (cfg) => UnshieldedWallet(cfg).startWithPublicKey(PublicKey.fromKeyStore(unshieldedKeystore)),
-    dust: (cfg) => DustWallet(cfg).startWithSecretKey(dustSecretKey, ledger.LedgerParameters.initialParameters().dust)
+    // Same fork-spanning shape as ShieldedWallet above.
+    dust: (cfg) => DustWallet(cfg).startWithSeed(keys[Roles.Dust], ledger.LedgerParameters.initialParameters().dust)
   });
-  await wallet.start(shieldedSecretKeys, dustSecretKey);
+  // WalletFacade.start now takes one FacadeStartMaterial — either a WalletSeeds bundle or an
+  // explicit per-epoch key set — not the two v8 secret-key objects it used to.
+  await wallet.start({ shielded: keys[Roles.Zswap], unshielded: keys[Roles.NightExternal], dust: keys[Roles.Dust] });
   return { wallet, shieldedSecretKeys, dustSecretKey, unshieldedKeystore };
 }
 
@@ -173,9 +195,18 @@ async function createWalletAndMidnightProvider(ctx: {
   shieldedSecretKeys: ledger.ZswapSecretKeys;
   dustSecretKey: ledger.DustSecretKey;
   unshieldedKeystore: ReturnType<typeof createKeystore>;
-}): Promise<WalletProvider & MidnightProvider> {
+}): Promise<{ walletProvider: WalletProvider; midnightProvider: MidnightProvider }> {
   const state = await Rx.firstValueFrom(ctx.wallet.state().pipe(Rx.filter((s) => s.isSynced)));
-  return {
+  // `WalletFacade`'s balanceUnboundTransaction/submitTransaction work with live
+  // (v9) ledger objects, but midnight-js-contracts@5.0.0-beta.8 tags every
+  // payload crossing a provider seam with the ledger era it belongs to, and
+  // refuses to call a provider that doesn't declare which eras it serves
+  // (`SeamEraUnsupportedError`) — a raw object implementing the old
+  // balanceTx/submitTx shape declares none. createWalletProvider/
+  // createMidnightProvider lift a v9-only implementation into that
+  // version-tagged interface without hand-rolling the tag — see
+  // @midnight-ntwrk/midnight-js-types' own docs on both functions.
+  const walletProvider = createWalletProvider({
     getCoinPublicKey() {
       return state.shielded.coinPublicKey.toHexString();
     },
@@ -183,17 +214,13 @@ async function createWalletAndMidnightProvider(ctx: {
       return state.shielded.encryptionPublicKey.toHexString();
     },
     async balanceTx(tx: any, ttl?: Date) {
-      const recipe = await ctx.wallet.balanceUnboundTransaction(
-        tx,
-        { shieldedSecretKeys: ctx.shieldedSecretKeys, dustSecretKey: ctx.dustSecretKey },
-        { ttl: ttl ?? new Date(Date.now() + 30 * 60 * 1000) }
-      );
+      // No longer takes secret keys per call — the facade already holds them from `start()`.
+      const recipe = await ctx.wallet.balanceUnboundTransaction(tx, { ttl: ttl ?? new Date(Date.now() + 30 * 60 * 1000) });
       return ctx.wallet.finalizeRecipe(recipe);
-    },
-    submitTx(tx: any) {
-      return ctx.wallet.submitTransaction(tx) as any;
     }
-  };
+  });
+  const midnightProvider = createMidnightProvider((tx: any) => ctx.wallet.submitTransaction(tx) as any);
+  return { walletProvider, midnightProvider };
 }
 
 async function main() {
@@ -208,9 +235,9 @@ async function main() {
   }
   await registerForDustGeneration(wallet, unshieldedKeystore);
 
-  const walletAndMidnightProvider = await createWalletAndMidnightProvider({ wallet, shieldedSecretKeys, dustSecretKey, unshieldedKeystore });
+  const { walletProvider, midnightProvider } = await createWalletAndMidnightProvider({ wallet, shieldedSecretKeys, dustSecretKey, unshieldedKeystore });
   const zkConfigProvider = new NodeZkConfigProvider(zkConfigPath);
-  const accountId = walletAndMidnightProvider.getCoinPublicKey();
+  const accountId = walletProvider.getCoinPublicKey();
   const storagePassword = `${Buffer.from(accountId, "hex").toString("base64")}!`;
 
   const providers = {
@@ -222,12 +249,21 @@ async function main() {
     publicDataProvider: indexerPublicDataProvider(config.indexer, config.indexerWS),
     zkConfigProvider,
     proofProvider: httpClientProofProvider(config.proofServer, zkConfigProvider),
-    walletProvider: walletAndMidnightProvider,
-    midnightProvider: walletAndMidnightProvider
+    walletProvider,
+    midnightProvider
   };
 
-  const compiledContract = CompiledContract.make("warden", WardenContract as any).pipe(
-    CompiledContract.withCompiledFileAssets(zkConfigPath)
+  // CompiledContract.make's 2nd argument is the contract *constructor* itself
+  // (`Types.Ctor<C>`), not the whole module namespace — passing the module
+  // object compiles under `as any` but fails at runtime deep inside
+  // compact-js with "context.ctor is not a constructor", since there's no
+  // real class behind a namespace object. withWitnesses is also required:
+  // CompiledContract.Context is a union of the witnesses requirement and the
+  // compiled-assets-path requirement, and omitting either compiles clean
+  // only because of the `as any` a few lines below — it isn't optional.
+  const compiledContract = CompiledContract.make("warden", WardenContract.Contract).pipe(
+    CompiledContract.withCompiledFileAssets(zkConfigPath),
+    CompiledContract.withWitnesses(witnesses)
   );
 
   const deployed = await withStatus("deploying warden.compact to the devnet", () =>
@@ -282,7 +318,7 @@ async function main() {
   }
 
   await withStatus("authorize 120 (within cap — expect AUTHORIZED)", async () => {
-    const finalized = await (deployed as any).callTx.authorize(id, 120n, policy.asset, policy.actionType, policy.destinationCategory, BigInt(Math.floor(Date.now() / 1000)));
+    const finalized = await (deployed as any).callTx.authorize(id, 120n, policy.asset, policy.actionType, policy.destinationCategory);
     log(`  tx ${finalized.public.txId} in block ${finalized.public.blockHeight}`);
   });
   ps = (await providers.privateStateProvider.get(privateStateId)) as WardenPrivateState;
@@ -294,7 +330,7 @@ async function main() {
 
   try {
     await withStatus("authorize 99999 (over cap — expect BLOCKED)", async () => {
-      await (deployed as any).callTx.authorize(id, 99_999n, policy.asset, policy.actionType, policy.destinationCategory, BigInt(Math.floor(Date.now() / 1000)));
+      await (deployed as any).callTx.authorize(id, 99_999n, policy.asset, policy.actionType, policy.destinationCategory);
     });
     log("  !! unexpectedly succeeded");
   } catch (e) {
@@ -308,7 +344,7 @@ async function main() {
 
   try {
     await withStatus("authorize 120 after revoke (expect BLOCKED)", async () => {
-      await (deployed as any).callTx.authorize(id, 120n, policy.asset, policy.actionType, policy.destinationCategory, BigInt(Math.floor(Date.now() / 1000)));
+      await (deployed as any).callTx.authorize(id, 120n, policy.asset, policy.actionType, policy.destinationCategory);
     });
     log("  !! unexpectedly succeeded");
   } catch (e) {
