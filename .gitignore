@@ -25,3 +25,7 @@ infra/devnet/deploy-script-legacy/contract/src/managed/
 infra/devnet/**/logs/
 infra/devnet/**/*.leveldb/
 infra/devnet/**/private-state-store*/
+infra/devnet/**/midnight-level-db/
+
+# A real (if testnet-only) wallet seed — never committed, even for Preprod.
+infra/devnet/**/.preprod-seed
