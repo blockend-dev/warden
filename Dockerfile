@@ -30,11 +30,17 @@ RUN npm run build --workspace packages/agent-adapter
 
 # apps/web's live-Preprod backend needs the SAME warden.compact source
 # recompiled with an older Compact compiler (0.31.1) to match the stable
-# midnight-js line it uses — see docs/IMPLEMENTATION-NOTES.md and
-# apps/web/src/server/preprod/preprod-network.ts. `compact compile` fetches
-# the pinned +0.31.1 toolchain on demand if it isn't already cached; this is
-# a no-op when WARDEN_NETWORK isn't "preprod" (the compiled contract is
-# unused, but harmless to have built).
+# midnight-js line it uses — see docs/DEPLOYMENT.md and
+# apps/web/src/server/preprod/preprod-network.ts. Unlike `compact update`
+# (no version pinned), `compact compile +0.31.1` does NOT fetch a missing
+# toolchain on demand — it fails outright on a fresh machine that has never
+# installed that exact version. `--no-set-default` installs it alongside
+# 0.34.0 without changing which one plain `compact compile` (no `+version`)
+# resolves to elsewhere in this build (packages/contracts' own script pins
+# `+0.34.0` explicitly too, but this keeps the ambient default honest
+# regardless). This step runs even when WARDEN_NETWORK isn't "preprod" —
+# the compiled output goes unused in that case, but harmless to have built.
+RUN compact update 0.31.1 --no-set-default
 RUN npm run compact:legacy --workspace apps/web
 
 RUN npm run build --workspace apps/web
