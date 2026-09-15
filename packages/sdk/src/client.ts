@@ -11,7 +11,7 @@ import { encodeCategory, randomBytes32, toHex } from "@warden/shared";
 import type { ActionRequest, MandateSummary, PolicyInput } from "@warden/shared";
 import { classifyCircuitError } from "./errors.js";
 import { createIdentity, type Identity } from "./identity.js";
-import { LocalSimulatorNetwork, type WardenBackend } from "./network.js";
+import { LocalSimulatorNetwork, type LiveEvidence, type WardenBackend } from "./network.js";
 
 export type WardenRole = "principal" | "agent";
 
@@ -28,6 +28,9 @@ export type MandateHandoff = {
   // Nonce behind the mandate's initial spend commitment. Required for the
   // agent's first authorize call to match the on-chain commitment.
   readonly spentNonce: Uint8Array;
+  /** Set only by a real network-backed `WardenBackend` (never the simulator)
+   * — verifiable proof this call actually reached the chain. */
+  readonly evidence?: LiveEvidence;
 };
 
 let sharedNetwork: Promise<LocalSimulatorNetwork> | undefined;
@@ -92,16 +95,18 @@ export class WardenClient {
     };
     this.privateState = withMandate(this.privateState, id, record);
 
+    let evidence: LiveEvidence | undefined;
     try {
       const net = await this.network;
       const result = await net.createMandate(this.privateState, id);
       this.privateState = finalizeAfterCall(result.privateState, id, 0n);
+      evidence = result.evidence;
     } catch (cause) {
       throw classifyCircuitError(cause);
     }
 
     const spentNonce = this.privateState.mandates[idHex(id)]?.spentNonce ?? new Uint8Array(32);
-    return { id, context, spentNonce };
+    return { id, context, spentNonce, evidence };
   }
 
   /** Agent only. Adopts a mandate handed off by its principal. */
@@ -115,8 +120,10 @@ export class WardenClient {
     this.privateState = withMandate(this.privateState, handoff.id, record);
   }
 
-  /** Agent only. Throws a typed `WardenError` on rejection. */
-  async authorize(id: Uint8Array, action: ActionRequest): Promise<void> {
+  /** Agent only. Throws a typed `WardenError` on rejection. Returns
+   * verifiable on-chain evidence when the backend is a real network (never
+   * the simulator). */
+  async authorize(id: Uint8Array, action: ActionRequest): Promise<LiveEvidence | undefined> {
     try {
       const net = await this.network;
       const result = await net.authorize(
@@ -128,17 +135,20 @@ export class WardenClient {
         encodeCategory(action.destinationCategory)
       );
       this.privateState = finalizeAfterCall(result.privateState, id, action.amount);
+      return result.evidence;
     } catch (cause) {
       throw classifyCircuitError(cause);
     }
   }
 
-  /** Principal only. */
-  async revoke(id: Uint8Array): Promise<void> {
+  /** Principal only. Returns verifiable on-chain evidence when the backend
+   * is a real network (never the simulator). */
+  async revoke(id: Uint8Array): Promise<LiveEvidence | undefined> {
     try {
       const net = await this.network;
       const result = await net.revoke(this.privateState, id);
       this.privateState = result.privateState;
+      return result.evidence;
     } catch (cause) {
       throw classifyCircuitError(cause);
     }
@@ -148,7 +158,7 @@ export class WardenClient {
    * the mandate's context locally (expiry isn't persisted on-chain). */
   async status(id: Uint8Array): Promise<MandateSummary> {
     const net = await this.network;
-    const ledger = net.getLedger();
+    const ledger = await net.getLedger();
     const registered = ledger.registered.member(id);
     const revoked = ledger.revoked.member(id);
     const record = this.privateState.mandates[idHex(id)];

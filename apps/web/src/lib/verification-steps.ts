@@ -7,6 +7,25 @@
 export type StepState = "pass" | "fail" | "pending";
 export type Step = { label: string; state: StepState };
 
+// Errors a real network-backed WardenBackend can throw that never come from
+// the circuit's own check order — a dead proof server or node has nothing
+// to do with "was the mandate found" / "is it within cap". Showing the
+// step checklist for one of these would misattribute an infra failure to a
+// specific (wrong) circuit assertion, so callers should check
+// `isNetworkErrorKind` first and render a distinct notice instead of
+// `stepsForOutcome`.
+const NETWORK_ERROR_KINDS = new Set([
+  "NetworkUnavailableError",
+  "ProofGenerationError",
+  "InsufficientBalanceError",
+  "TransactionTimeoutError",
+  "TransactionFailedError"
+]);
+
+export function isNetworkErrorKind(kind: string): boolean {
+  return NETWORK_ERROR_KINDS.has(kind);
+}
+
 export const AUTHORIZE_STEPS = [
   "Mandate located",
   "Not revoked",

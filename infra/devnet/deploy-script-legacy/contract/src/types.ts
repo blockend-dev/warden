@@ -5,7 +5,7 @@
 // compiler's generated `.d.ts` — every place a struct is used (a witness
 // signature, a pure-circuit signature) gets its own structurally-identical
 // anonymous object-literal type instead (verified against the real compiler
-// output; see `docs/IMPLEMENTATION-NOTES.md`). These two types exist purely
+// output). These two types exist purely
 // so the rest of the TypeScript codebase has one name to import instead of
 // repeating the inline shape everywhere — they are structurally, not
 // nominally, checked against the generated types, so if `warden.compact`'s

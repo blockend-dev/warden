@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       rememberMandate(session, handoff);
 
       const status = await session.principal.status(handoff.id);
-      return NextResponse.json({ id: toHex(handoff.id), status });
+      return NextResponse.json({ id: toHex(handoff.id), status, evidence: handoff.evidence });
     } catch (cause) {
       return NextResponse.json({ error: describeError(cause) }, { status: 400 });
     }

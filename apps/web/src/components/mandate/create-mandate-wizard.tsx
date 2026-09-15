@@ -6,8 +6,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import { HexChip } from "@/components/ui/hex-chip";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { PrivacyBoundary, type BoundaryField } from "@/components/ui/privacy-boundary";
+import { LiveEvidencePanel } from "@/components/ui/live-evidence";
 import { useSession } from "@/store/session-store";
 import type { MandateStatus } from "@warden/shared";
+// Type-only — erased at compile time, no runtime/client-bundle impact.
+import type { LiveEvidence } from "@warden/sdk";
 
 const STEPS = ["Principal", "Agent", "Policy", "Privacy preview", "Confirm"] as const;
 
@@ -38,7 +41,7 @@ export function CreateMandateWizard() {
   const [policy, setPolicy] = useState<PolicyForm>(DEFAULT_POLICY);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ id: string; status: MandateStatus } | null>(null);
+  const [result, setResult] = useState<{ id: string; status: MandateStatus; evidence?: LiveEvidence } | null>(null);
 
   useEffect(() => {
     fetch("/api/identity")
@@ -65,7 +68,7 @@ export function CreateMandateWizard() {
         spentCommitment: data.status.spentCommitment,
         policy: { ...policy, expiryUnix: Math.floor(Date.now() / 1000) + policy.expiresInSeconds }
       });
-      setResult({ id: data.id, status: data.status.status });
+      setResult({ id: data.id, status: data.status.status, evidence: data.evidence });
       setStep(4);
     } catch (e) {
       setCreateError((e as Error).message);
@@ -231,6 +234,7 @@ export function CreateMandateWizard() {
                   <StatusBadge status={result.status} />
                 </div>
               </div>
+              {result.evidence && <LiveEvidencePanel evidence={result.evidence} />}
             </StepBody>
           )}
         </motion.div>

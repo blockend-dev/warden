@@ -14,9 +14,9 @@ export async function POST(request: Request) {
     }
 
     try {
-      await session.principal.revoke(fromHex(body.id));
+      const evidence = await session.principal.revoke(fromHex(body.id));
       const status = await session.principal.status(handoff.id);
-      return NextResponse.json({ revoked: true, status });
+      return NextResponse.json({ revoked: true, status, evidence });
     } catch (cause) {
       return NextResponse.json({ revoked: false, error: describeError(cause) }, { status: 400 });
     }

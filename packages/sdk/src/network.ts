@@ -5,12 +5,27 @@ import {
 } from "@midnight-ntwrk/compact-runtime";
 import { Contract, ledger, witnesses, emptyWardenPrivateState, type Ledger, type WardenPrivateState } from "@warden/contracts";
 
-type CallResult = { ledger: Ledger; privateState: WardenPrivateState };
+/** Present only on a `WardenBackend` that actually submitted a transaction
+ * to a real network (never on `LocalSimulatorNetwork`) — lets callers show
+ * a judge/user verifiable on-chain evidence, without every backend having
+ * to fabricate placeholder values for it. */
+export type LiveEvidence = {
+  readonly network: string;
+  readonly txId: string;
+  readonly blockHeight: number;
+  readonly contractAddress: string;
+};
+
+type CallResult = { ledger: Ledger; privateState: WardenPrivateState; evidence?: LiveEvidence };
 
 /** Everything a `WardenClient` needs from "the chain", kept narrow so a real
- * network-backed provider is a drop-in replacement. */
+ * network-backed provider is a drop-in replacement.
+ *
+ * `getLedger` is async because a real network-backed implementation has to
+ * query it (an indexer round-trip) — `LocalSimulatorNetwork` just wraps its
+ * in-memory state in an already-resolved promise. */
 export interface WardenBackend {
-  getLedger(): Ledger;
+  getLedger(): Promise<Ledger>;
   createMandate(privateState: WardenPrivateState, id: Uint8Array): Promise<CallResult>;
   authorize(
     privateState: WardenPrivateState,
@@ -25,9 +40,12 @@ export interface WardenBackend {
 
 /**
  * In-process `WardenBackend`: runs the real compiled circuits via
- * `@midnight-ntwrk/compact-runtime`, no proof server or network. Live
- * deployment is currently blocked by a compiler/SDK version mismatch, not
- * this codebase — see docs/IMPLEMENTATION-NOTES.md.
+ * `@midnight-ntwrk/compact-runtime`, no proof server or network. Used as the
+ * default for local development and as the explicit fallback/dev mode
+ * alongside the real `PreprodNetwork`
+ * (`apps/web/src/server/preprod/preprod-network.ts`) — see
+ * docs/DEPLOYMENT.md for why they're two different compiled artifacts, not
+ * one.
  *
  * `state`/`zswap` are the shared public ledger; `privateState` is passed in
  * per call as each party's own state.
@@ -52,7 +70,7 @@ export class LocalSimulatorNetwork implements WardenBackend {
     return new LocalSimulatorNetwork(sampleContractAddress(), ctor.currentContractState, ctor.currentZswapLocalState);
   }
 
-  getLedger(): Ledger {
+  async getLedger(): Promise<Ledger> {
     return ledger(this.state);
   }
 
@@ -96,7 +114,7 @@ export class LocalSimulatorNetwork implements WardenBackend {
     this.state = context.callContext.currentQueryContext.state;
     this.zswap = context.callContext.currentZswapLocalState ?? this.zswap;
     return {
-      ledger: this.getLedger(),
+      ledger: ledger(this.state),
       privateState: context.callContext.currentPrivateState as WardenPrivateState
     };
   }

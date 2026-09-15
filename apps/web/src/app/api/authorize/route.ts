@@ -14,14 +14,14 @@ export async function POST(request: Request) {
     }
 
     try {
-      await session.agent.authorize(fromHex(body.id), {
+      const evidence = await session.agent.authorize(fromHex(body.id), {
         amount: BigInt(body.amount),
         asset: body.asset,
         actionType: body.actionType,
         destinationCategory: body.destinationCategory
       });
       const status = await session.principal.status(handoff.id);
-      return NextResponse.json({ authorized: true, status });
+      return NextResponse.json({ authorized: true, status, evidence });
     } catch (cause) {
       const error = describeError(cause);
       const status = await session.principal.status(handoff.id);

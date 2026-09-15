@@ -4,7 +4,7 @@
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
-  "description": "Real end-to-end validation: deploys warden.compact to the local Docker devnet (infra/devnet/standalone.yml) and submits real proof-bearing transactions. See docs/IMPLEMENTATION-NOTES.md for why this is separate from packages/sdk's LocalSimulatorNetwork rather than a replacement for it.",
+  "description": "Real end-to-end validation: deploys warden.compact to the local Docker devnet (infra/devnet/standalone.yml) and submits real proof-bearing transactions, via the current (0.34.0-compiled) midnight-js@5.0.0-beta line. Separate from packages/sdk's LocalSimulatorNetwork, not a replacement for it — see infra/devnet/deploy-script-legacy/ for the stable-SDK line apps/web's live Preprod backend actually reuses (docs/DEPLOYMENT.md).",
   "scripts": {
     "start": "node --experimental-strip-types src/deploy-and-call.ts"
   },

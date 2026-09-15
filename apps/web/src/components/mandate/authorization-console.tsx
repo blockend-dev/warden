@@ -3,8 +3,12 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { VerificationSteps } from "@/components/ui/verification-steps";
-import { stepsForOutcome, type Step } from "@/lib/verification-steps";
+import { LiveEvidencePanel } from "@/components/ui/live-evidence";
+import { stepsForOutcome, isNetworkErrorKind, type Step } from "@/lib/verification-steps";
 import { useSession, type LocalMandate } from "@/store/session-store";
+// Type-only — erased at compile time, does not pull @warden/sdk's runtime
+// (or its server-only live-network dependencies) into the client bundle.
+import type { LiveEvidence } from "@warden/sdk";
 
 type Outcome = { authorized: true } | { authorized: false; kind: string; message: string };
 
@@ -19,12 +23,16 @@ export function AuthorizationConsole({ mandate }: { mandate: LocalMandate }) {
   const [running, setRunning] = useState(false);
   const [steps, setSteps] = useState<Step[] | null>(null);
   const [failureDetail, setFailureDetail] = useState<string | undefined>();
+  const [networkIssue, setNetworkIssue] = useState<string | undefined>();
+  const [evidence, setEvidence] = useState<LiveEvidence | undefined>();
 
   const disabled = mandate.status !== "active" || running;
 
   async function submit(amountValue: number) {
     setRunning(true);
     setSteps(null);
+    setNetworkIssue(undefined);
+    setEvidence(undefined);
     try {
       const res = await fetch("/api/authorize", {
         method: "POST",
@@ -42,8 +50,17 @@ export function AuthorizationConsole({ mandate }: { mandate: LocalMandate }) {
         ? { authorized: true }
         : { authorized: false, kind: data.error?.kind ?? "WardenError", message: data.error?.message ?? "Rejected" };
 
-      setSteps(stepsForOutcome(outcome));
+      // A dead proof server or node isn't a circuit check that failed — it's
+      // not a check at all, so the step checklist (which reconstructs the
+      // circuit's own assert order) would misattribute it. Show it as its
+      // own distinct notice instead.
+      if (!outcome.authorized && isNetworkErrorKind(outcome.kind)) {
+        setNetworkIssue(outcome.message);
+      } else {
+        setSteps(stepsForOutcome(outcome));
+      }
       setFailureDetail(outcome.authorized ? undefined : outcome.message);
+      if (data.evidence) setEvidence(data.evidence);
 
       if (data.status) {
         updateStatus(mandate.id, {
@@ -104,9 +121,14 @@ export function AuthorizationConsole({ mandate }: { mandate: LocalMandate }) {
         </div>
       </div>
 
-      {(running || steps) && (
+      {(running || steps || networkIssue) && (
         <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="mt-5 border-t border-white/10 pt-4">
-          {running && !steps && <p className="text-sm text-slate-500">Running the real circuit call…</p>}
+          {running && !steps && !networkIssue && <p className="text-sm text-slate-500">Running the real circuit call…</p>}
+          {networkIssue && (
+            <p className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3 text-xs text-amber-300">
+              Live network issue, not a policy rejection: {networkIssue}
+            </p>
+          )}
           {steps && (
             <>
               <VerificationSteps steps={steps} failureDetail={failureDetail} />
@@ -117,6 +139,7 @@ export function AuthorizationConsole({ mandate }: { mandate: LocalMandate }) {
               </p>
             </>
           )}
+          {evidence && <LiveEvidencePanel evidence={evidence} />}
         </motion.div>
       )}
 

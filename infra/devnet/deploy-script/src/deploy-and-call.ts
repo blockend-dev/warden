@@ -4,17 +4,19 @@
 // authorize (valid), authorize (over-cap — expected to fail), revoke, and
 // authorize-after-revoke (expected to fail).
 //
-// This is deliberately a standalone script, not (yet) wired into
-// packages/sdk's WardenBackend abstraction — see docs/IMPLEMENTATION-NOTES.md
-// for why: the wallet/provider plumbing below (HD key derivation across
-// three roles, dust registration, RxJS-based sync) is real, non-trivial
-// integration surface that's worth validating in isolation first. Promoting
-// this into a proper `LiveNetwork implements WardenBackend` is a named next
-// step once this script itself is proven out.
+// This script targets the current (0.34.0-compiled) contract via the
+// newest midnight-js@5.0.0-beta line — the wallet/provider plumbing below
+// (HD key derivation across three roles, dust registration, RxJS-based
+// sync) works, but that line's own WASM class-identity mismatch (a
+// wallet-sdk-dust-wallet / midnight-js-contracts incompatibility, not a
+// Warden defect) stops it short of a real deployment. The stable-SDK line
+// that *does* reach a full live deployment — and that apps/web's live
+// Preprod backend actually reuses — is
+// infra/devnet/deploy-script-legacy/; see docs/DEPLOYMENT.md for that
+// path's evidence.
 //
 // Adapted directly from midnightntwrk/example-counter's counter-cli
-// (api.ts / cli.ts / config.ts), fetched 2026-09-07 — see
-// docs/IMPLEMENTATION-NOTES.md. Structure and provider wiring follow that
+// (api.ts / cli.ts / config.ts). Structure and provider wiring follow that
 // reference as closely as possible rather than being invented, since this is
 // exactly the kind of "trust the current official implementation" case the
 // project was asked to prioritize.
@@ -43,7 +45,7 @@ import { createMidnightProvider, createWalletProvider, type MidnightProvider, ty
 // (midnight-js-contracts@5.0.0-beta.8 builds v9 transactions internally); the last
 // @midnight-ntwrk-scoped wallet-sdk-dust-wallet release still assumed ledger-v8 throughout and
 // threw `expected instance of LedgerParameters` deep inside @midnightntwrk/ledger-v9's WASM the
-// moment it tried to fee-balance one. See docs/IMPLEMENTATION-NOTES.md.
+// moment it tried to fee-balance one — see this file's own top comment.
 import {
   WalletFacade,
   DustWallet,

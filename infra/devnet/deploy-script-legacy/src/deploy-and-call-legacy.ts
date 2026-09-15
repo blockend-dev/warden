@@ -1,12 +1,12 @@
-// Experiment: live devnet deployment against the *stable* midnight-js line
+// Live devnet/Preprod deployment against the *stable* midnight-js line
 // (4.1.1), using warden.compact recompiled with Compact compiler 0.31.1 —
 // whose synchronous circuit API matches the compact-runtime version that
-// line's dependency chain actually ships with (see
-// docs/IMPLEMENTATION-NOTES.md for the full version-skew story that led
-// here). Otherwise identical to infra/devnet/deploy-script's
-// deploy-and-call.ts — same genesis wallet, same devnet, same demo
-// sequence — the only difference is which compiled contract and which
-// midnight-js version it targets.
+// line's dependency chain actually ships with. This is the path
+// apps/web's live Preprod backend (apps/web/src/server/preprod/) reuses —
+// see docs/DEPLOYMENT.md for the resulting evidence. Otherwise identical
+// to infra/devnet/deploy-script's deploy-and-call.ts — same genesis
+// wallet, same devnet, same demo sequence — the only difference is which
+// compiled contract and which midnight-js version it targets.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -47,8 +47,7 @@ globalThis.WebSocket = WebSocket;
 // Preprod network instead of the local devnet — everything else (contract,
 // wallet-building logic, demo sequence) is identical either way. The proof
 // server is *always* local regardless of target: Midnight's own docs are
-// explicit that it "runs locally... because it handles your private data" —
-// see docs/IMPLEMENTATION-NOTES.md.
+// explicit that it "runs locally... because it handles your private data".
 const TARGET = process.env.TARGET === "preprod" ? "preprod" : "local";
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));

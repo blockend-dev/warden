@@ -27,6 +27,16 @@ RUN npm run build --workspace packages/contracts
 RUN npm run build --workspace packages/shared
 RUN npm run build --workspace packages/sdk
 RUN npm run build --workspace packages/agent-adapter
+
+# apps/web's live-Preprod backend needs the SAME warden.compact source
+# recompiled with an older Compact compiler (0.31.1) to match the stable
+# midnight-js line it uses — see docs/IMPLEMENTATION-NOTES.md and
+# apps/web/src/server/preprod/preprod-network.ts. `compact compile` fetches
+# the pinned +0.31.1 toolchain on demand if it isn't already cached; this is
+# a no-op when WARDEN_NETWORK isn't "preprod" (the compiled contract is
+# unused, but harmless to have built).
+RUN npm run compact:legacy --workspace apps/web
+
 RUN npm run build --workspace apps/web
 
 ENV NODE_ENV=production

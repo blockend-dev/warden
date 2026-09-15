@@ -8,11 +8,12 @@
 //
 // Deliberately still in-memory, not a database: correct for a single
 // long-lived Node process (the deployment target documented in
-// docs/IMPLEMENTATION-NOTES.md), not for a serverless/multi-instance host
-// where separate requests may land on separate processes.
+// docs/DEPLOY-RAILWAY.md), not for a serverless/multi-instance host where
+// separate requests may land on separate processes.
 
 import { createWarden, type MandateHandoff, type WardenClient } from "@warden/sdk";
 import { toHex } from "@warden/shared";
+import { getNetwork } from "@/server/network";
 
 export type DemoSession = {
   principal: WardenClient;
@@ -36,9 +37,14 @@ function store(): Map<string, DemoSession> {
 }
 
 function fresh(): DemoSession {
+  // Both roles share one WardenBackend — the simulator or the live Preprod
+  // connection, whichever this deployment is configured for (see
+  // ../server/network.ts). Each role still gets its own identity and its
+  // own private state; only the backend they call through is shared.
+  const network = getNetwork();
   return {
-    principal: createWarden({ role: "principal" }),
-    agent: createWarden({ role: "agent" }),
+    principal: createWarden({ role: "principal", network }),
+    agent: createWarden({ role: "agent", network }),
     handoffs: new Map()
   };
 }
