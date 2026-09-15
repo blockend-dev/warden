@@ -14,10 +14,20 @@ npm-debug.log*
 packages/contracts/src/managed/
 
 # Same reasoning for the live-devnet validation scripts under infra/devnet —
-# see docs/IMPLEMENTATION-NOTES.md, "Live devnet" section. The legacy variant
-# is compiled with an intentionally older compiler (0.31.1); regenerate via
+# see docs/DEPLOYMENT.md. The legacy variant is compiled with an
+# intentionally older compiler (0.31.1); regenerate via
 # `compact compile --directory ~/.compact src/warden.compact <out> +0.31.1`.
 infra/devnet/deploy-script-legacy/contract/src/managed/
+
+# apps/web's own copy of the same 0.31.1-compiled artifacts, for its live
+# Preprod backend — regenerate via `npm run compact:legacy --workspace apps/web`.
+apps/web/src/server/preprod/contract/managed/
+
+# Server-side wallet sync/checkpoint state for apps/web's live Preprod
+# connection — never secrets by itself, but never something to commit;
+# reused across restarts only via a mounted Railway volume, not git.
+apps/web/midnight-level-db/
+apps/web/.preprod-seed
 
 # Wallet/private-state storage the deploy scripts create when run (LevelDB
 # stores, transaction logs) — local, per-run state, never secrets meant to be

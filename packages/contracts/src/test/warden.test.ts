@@ -89,7 +89,7 @@ describe("createMandate", () => {
 
 describe("authorize — block-time expiry enforcement", () => {
   // Regression coverage: currentTime was previously caller-supplied and
-  // unenforceable. See docs/IMPLEMENTATION-NOTES.md.
+  // unenforceable. See docs/THREAT-MODEL.md, "Block-time enforcement".
   let sim: WardenSimulator;
   let id: Uint8Array;
 

@@ -13,8 +13,9 @@ This file is not a description of theoretical security; where something is
   function (`principalSecret`, `agentSecret`, `mandateContextOf`,
   `spentSoFar`, `spentNonce`, `freshNonce`) is treated by every circuit as a
   claim, not a fact — each is independently re-verified against public
-  commitments before it is relied on. Confirmed against the real compiler:
-  `docs/IMPLEMENTATION-NOTES.md`.
+  commitments before it is relied on. Stated explicitly in Midnight's own
+  docs, not an inference Warden makes, and confirmed against the real
+  compiler.
 - **Frontend and SDK state are never authoritative.** The UI's "AUTHORIZED /
   BLOCKED / REVOKED" labels reflect whether a circuit call actually
   succeeded or threw — they do not gate anything themselves. There is no
@@ -34,8 +35,7 @@ relationship between two values the same party controlled. The current
 implementation uses the Compact standard library's `blockTimeLte`, which is
 evaluated against the ledger's own block time instead. Cost:
 `blockTimeLte`'s argument must be public, so `Policy.expiry` is disclosed
-(see `docs/PRIVACY.md`); every other field is unaffected. Full technical
-account: `docs/IMPLEMENTATION-NOTES.md`. Tests:
+(see `docs/PRIVACY.md`); every other field is unaffected. Tests:
 `authorize — block-time expiry enforcement` (four tests, including exact
 boundary in both directions) and `createMandate > rejects an expiry that has
 already passed` / `> accepts an expiry exactly at the current block time`.
@@ -143,8 +143,7 @@ already passed` / `> accepts an expiry exactly at the current block time`.
     previously-issued nonce (see `packages/contracts/src/witnesses.ts`).
     Documented as a hard requirement rather than silently assumed: reusing a
     nonce across two commitments would let an observer link them, exactly
-    the failure mode named in Midnight's own Compact security guidance
-    (`docs/IMPLEMENTATION-NOTES.md`).
+    the failure mode named in Midnight's own Compact security guidance.
 
 13. **Exploit missing domain separation.**
     Expected: hash outputs for structurally different purposes (a
@@ -176,8 +175,8 @@ already passed` / `> accepts an expiry exactly at the current block time`.
     see above), and changing any of them invalidates the proof rather than
     the action.
 
-16. **Forge or lie about the current time.** See "Vulnerabilities found and
-    fixed" above — this was a real, exploitable gap, not merely tested for.
+16. **Forge or lie about the current time.** See "Block-time enforcement"
+    above — this was a real, exploitable gap, not merely tested for.
 
 17. **Concurrent/double execution: two proofs built from the same starting
     state.** Expected: only the one that lands first succeeds; the second is
@@ -205,4 +204,4 @@ already passed` / `> accepts an expiry exactly at the current block time`.
   (Wave 1 colocates both roles' secrets in one demo session; real
   cross-process handoff is a named Wave 2 item, not solved here).
 - Multi-contract composition for delegation (current Compact composability
-  limitation — see `docs/IMPLEMENTATION-NOTES.md`, item 2).
+  limitation, not a Warden design gap — see `docs/ARCHITECTURE.md` §5c).

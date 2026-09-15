@@ -9,19 +9,20 @@ leaves the holder's machine as plaintext. **SELECTIVE** = disclosed only to a
 specific party by an explicit, out-of-band step. **DERIVED** = computed, not
 stored. **COMMITMENT** = a one-way hash standing in for a private value.
 **REVOCATION MARKER** = Warden's own application-level revocation state
-(explicitly **not** a native Zswap nullifier — see
-`docs/IMPLEMENTATION-NOTES.md`, item 1).
+(explicitly **not** a native Zswap nullifier — Zswap nullifiers are a
+coin-spending primitive, not an exposed general-purpose "revoke any
+application credential" API in Compact; see `docs/ARCHITECTURE.md` §3).
 
 | Datum | Class | Who can see it |
 |---|---|---|
 | `Policy.maxAmount` / `.asset` / `.actionType` / `.destinationCategory` / `.actionCountLimit` | PRIVATE | Whoever holds the `MandateContext`: the principal always, the agent because it must to prove compliance |
-| `Policy.expiry` | PUBLIC | Any chain observer, disclosed on every `createMandate` and `authorize` call. Not a design preference: `blockTimeLte`, the standard-library primitive that checks it against the ledger's real block time, requires its argument to be public — the compiler rejects the alternative (see `docs/IMPLEMENTATION-NOTES.md`, "the block-time vulnerability"). This is the one field the audit moved from PRIVATE to PUBLIC; every other field is unaffected |
+| `Policy.expiry` | PUBLIC | Any chain observer, disclosed on every `createMandate` and `authorize` call. Not a design preference: `blockTimeLte`, the standard-library primitive that checks it against the ledger's real block time, requires its argument to be public — the compiler rejects the alternative (see `docs/THREAT-MODEL.md`, "Block-time enforcement"). This is the one field the audit moved from PRIVATE to PUBLIC; every other field is unaffected |
 | `principalSecret` / `agentSecret` | PRIVATE | Their respective holder only. Never appears in any circuit argument, ledger write, or SDK return value — only a `pkOf(...)` commitment to each ever reaches the contract |
 | `mandateId` | PUBLIC / COMMITMENT | Any chain observer. Reveals nothing about the policy, principal, or agent behind it without already knowing the preimage |
 | `registered` / `revoked` set membership | PUBLIC | Any chain observer. Reveals "a mandate with this id exists / was revoked", nothing about who or what it governs |
 | `spentCommitment[id]` | PUBLIC / COMMITMENT | Any chain observer sees an opaque 32-byte value that changes on every `authorize` call. Without the witness-held `(total, nonce)` pair, it reveals nothing about the running total, the cap, or any individual action's amount |
 | `actionCount[id]` | PUBLIC | Any chain observer. Reveals *how many* actions a mandate has authorized, not what any of them were |
-| Per-action `requestedAmount` / `requestedAsset` / `requestedActionType` / `requestedDestinationCategory` | PRIVATE | Circuit arguments are private-by-default in Compact (verified empirically — see `docs/IMPLEMENTATION-NOTES.md`) and are used only inside `assert` comparisons, never written to the ledger. No chain observer, including the principal watching the chain rather than their own local records, learns any individual action's specifics from on-chain data alone |
+| Per-action `requestedAmount` / `requestedAsset` / `requestedActionType` / `requestedDestinationCategory` | PRIVATE | Circuit arguments are private-by-default in Compact (verified empirically against the real compiler) and are used only inside `assert` comparisons, never written to the ledger. No chain observer, including the principal watching the chain rather than their own local records, learns any individual action's specifics from on-chain data alone |
 | `MandateContext` (the full private bundle) | SELECTIVE | Handed by the principal to the agent out of band at creation time — the contract never transmits it. See `docs/ARCHITECTURE.md` §7 for the honest caveat on how that handoff is (not yet) secured in Wave 1 |
 
 ## The one deliberate leak, stated precisely

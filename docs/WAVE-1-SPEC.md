@@ -194,26 +194,22 @@ layer, not a security boundary:
 ## 11. Deployment status
 
 - The real Compact compiler (0.34.0) compiles `warden.compact` to real
-  circuits; all tests run those compiled circuits through the official
-  TypeScript simulator pattern (`@midnight-ntwrk/compact-runtime`), with no
-  proof server or network involved.
-- A local devnet (node + indexer + proof server) exists under
-  `infra/devnet/` and has been brought up and verified healthy
-  independently, but the web application's `WardenBackend` is currently
-  wired only to `LocalSimulatorNetwork` — not to that devnet or to any live
-  network. No part of this codebase submits a transaction to Preview,
-  Preprod, or mainnet.
-- Live network deployment via the current compiler/SDK combination directly
-  is blocked by a documented package/compiler version-compatibility issue,
-  not by anything in Warden's own contract or application code — see
-  `docs/IMPLEMENTATION-NOTES.md`. **Post-Wave-1 update:** an older-compiler
-  path around that issue was found and validated after this baseline was
-  frozen — the full mandate lifecycle now has real, on-chain evidence on
-  both a local devnet and the live public Preprod network (contract
-  address, transaction hashes, block numbers in
-  `docs/IMPLEMENTATION-NOTES.md`). This baseline is left otherwise
-  unmodified per the Wave 2 resubmission requirement to state what changed
-  since Wave 1 (`docs/SUBMISSION-CHECKLIST.md`).
+  circuits; `packages/contracts`' test suite runs those compiled circuits
+  through the official TypeScript simulator pattern
+  (`@midnight-ntwrk/compact-runtime`), with no proof server or network
+  involved — this is the deterministic baseline this spec validates
+  against, and it is unaffected by anything below.
+- **Real Midnight Preprod deployment is verified.** The current,
+  security-fixed `warden.compact` — recompiled with an older Compact
+  compiler (0.31.1) to match a stable `midnight-js` line no protocol
+  behavior depends on — has been deployed to the real public Midnight
+  Preprod network, with real ZK proofs and real on-chain transactions for
+  the full mandate lifecycle, executed both through a standalone script
+  and through `apps/web`'s own server/API path
+  (`WARDEN_NETWORK=preprod`). Contract address, transaction hashes, and
+  block numbers: `docs/DEPLOYMENT.md`. The hosted demo defaults to the
+  in-process simulator and opts into this live path only when explicitly
+  configured — see `docs/DEPLOY-RAILWAY.md`.
 
 ## 12. Wave 1 validation baseline
 
@@ -224,7 +220,7 @@ written:
 - `packages/sdk` tests: **9/9 passing**.
 - `packages/agent-adapter` tests: **3/3 passing**.
 - `apps/web` typecheck (`tsc --noEmit`): **clean**.
-- `apps/web` production build (`next build`): **clean**, 8 routes.
+- `apps/web` production build (`next build`): **clean**, 9 routes.
 
 Any Wave 2 change that regresses these numbers, or removes an invariant
 listed in §4–§6, is a regression against this baseline.
@@ -237,10 +233,13 @@ repository:
 - Nested delegation (principal → agent → sub-agent mandates).
 - Selective auditor disclosure.
 - Policy composition beyond the fixed field set in `Policy`.
-- A real network-backed `WardenBackend` (devnet/testnet/mainnet).
 - Cross-process principal→agent handoff of `MandateContext` in transit
   (Wave 1 colocates both roles' secrets in one demo session).
 - Multi-contract composition for delegation.
+
+A real network-backed `WardenBackend` (`PreprodNetwork`, live Midnight
+Preprod) *is* implemented — see `docs/DEPLOYMENT.md` — added after this
+baseline's protocol invariants were frozen, without changing any of them.
 
 None of the above should be added to `warden.compact`, the SDK, or the
 application layer under the "Wave 1" label. They are Wave 2 candidates.

@@ -1,8 +1,7 @@
 # Warden — Verification Procedure
 
 A command-line procedure for independently checking Warden's claims — no
-browser, no recording, no trust required. For a narrated UI walkthrough
-instead, see [`docs/DEMO-SCRIPT.md`](DEMO-SCRIPT.md).
+browser, no recording, no trust required.
 
 ## The one-diagram privacy boundary
 
@@ -104,13 +103,11 @@ than relying on the UI not showing something it secretly has.
 ## What "verified" means here
 
 Every state transition above is a direct readout of a real circuit call's
-outcome against the real compiled `warden.compact`, run through the
-Compact-runtime simulator — not frontend state standing in for it, and not
-a mocked response. The "on-chain" framing describes what a full
-Preview/Preprod/Mainnet deployment does; this web app itself runs the
-identical circuit logic through the simulator rather than a live network,
-for demo responsiveness and to avoid asking judges to fund a wallet — the
-same lifecycle has separately been proven end to end with real proofs and
-real transactions on the live public Preprod network, see
-[`docs/IMPLEMENTATION-NOTES.md`](IMPLEMENTATION-NOTES.md) for the evidence
-and [`README.md`](../README.md) §12 for the summary.
+outcome against the real compiled `warden.compact` — not frontend state
+standing in for it, and not a mocked response. By default this runs
+through the in-process Compact-runtime simulator, for demo responsiveness
+and to avoid asking judges to fund a wallet; when a deployment sets
+`WARDEN_NETWORK=preprod`, the exact same calls run against the real,
+already-deployed contract on Midnight Preprod instead — real ZK proofs,
+real transactions. See [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) for the live
+evidence and which mode a given deployment is actually running.

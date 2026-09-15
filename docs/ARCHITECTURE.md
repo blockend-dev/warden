@@ -23,7 +23,7 @@ section summarizes.
 ## 3. Commitment-gated authorization
 
 Warden generalizes the pattern used by Midnight's own `example-bboard`
-contract (see `docs/IMPLEMENTATION-NOTES.md`): instead of authorizing by
+contract: instead of authorizing by
 *identity* ("this address may act"), it authorizes by *proof of knowledge of
 a secret behind a public commitment* ("whoever can reproduce this hash may
 act"). A mandate's public id is:
@@ -56,8 +56,8 @@ authorization") fail by construction rather than by convention.
 ## 5. Enforcement without disclosure: the spend commitment
 
 Compact circuits are bounded and stateless per call — there is no way to
-"loop over history" inside a circuit (see `docs/IMPLEMENTATION-NOTES.md`).
-To let the *public* ledger enforce a cumulative cap across many independent
+"loop over history" inside a circuit. To let the *public* ledger enforce a
+cumulative cap across many independent
 calls without ever publishing the cap, or even the plaintext running total,
 `authorize` uses a re-randomized commitment chain:
 
@@ -80,9 +80,10 @@ one caveat this does **not** cover.
 `authorize` originally took `currentTime` as a plain circuit argument and
 asserted `currentTime <= expiry` — which an adversarial prover could satisfy
 by simply not passing a real timestamp, since nothing tied the argument to
-reality. This was found during a production audit and is documented in full
-in `docs/IMPLEMENTATION-NOTES.md`. The fix removes the argument entirely and
-uses the Compact standard library's `blockTimeLte(x)`, which evaluates
+reality. This was found during a production audit; see
+`docs/THREAT-MODEL.md`, "Block-time enforcement," for the full account. The
+fix removes the argument entirely and uses the Compact standard library's
+`blockTimeLte(x)`, which evaluates
 against the ledger's own block time rather than a caller-supplied value:
 
 ```
@@ -146,7 +147,8 @@ docs/
   THREAT-MODEL.md
   PRIVACY.md
   DEMO.md
-  IMPLEMENTATION-NOTES.md  Toolchain grounding, written before any code
+  DEPLOYMENT.md          Live Preprod deployment evidence
+  DEPLOY-RAILWAY.md       Deployment instructions
 ```
 
 ## 7. What Wave 1 deliberately does not include, and why

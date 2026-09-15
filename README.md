@@ -17,16 +17,21 @@ mandate, by construction, not by convention.
 **Live demo:** [wardenweb-production.up.railway.app](https://wardenweb-production.up.railway.app/)
 — no setup required; see [§9](#9-demo) for exactly what it is and isn't.
 
+**Real Midnight Preprod deployment verified** — full mandate lifecycle,
+real ZK proofs, real on-chain transactions, executed through the web
+application's own server/API path, not just a standalone script. Contract
+address, transaction hashes, block numbers:
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+
 License: [Apache 2.0](LICENSE). Built on [Midnight](https://docs.midnight.network/)
 and its [Compact](https://docs.midnight.network/compact) language
 ([`midnightntwrk`](https://github.com/midnightntwrk) on GitHub). This
 repository's devnet topology and Compact idioms are adapted from the
 official [`midnightntwrk/example-counter`](https://github.com/midnightntwrk/example-counter)
-and `example-bboard` reference contracts, cited by exact provenance in
-[`docs/IMPLEMENTATION-NOTES.md`](docs/IMPLEMENTATION-NOTES.md). Authoritative
-technical spec: [`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md) — if anything
-below and that document disagree, the spec, and the Compact source it was
-derived from, wins.
+and `example-bboard` reference contracts. Authoritative technical spec:
+[`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md) — if anything below and that
+document disagree, the spec, and the Compact source it was derived from,
+wins.
 
 ## 1. What Warden is
 
@@ -97,9 +102,11 @@ that demo. All frozen and specified in
 [`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md).
 
 **Not** in Wave 1, and not implemented anywhere in this repository: nested
-delegation, a secured principal→agent handoff channel, and submission to a
-live Midnight network. See [§12](#12-current-limitations) and
-[§13](#13-roadmap).
+delegation and a secured principal→agent handoff channel. Live Midnight
+Preprod deployment — an open question at the Wave 1 baseline freeze — has
+since been achieved and verified; see
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). See [§12](#12-current-limitations)
+and [§13](#13-roadmap).
 
 ## 5. How it works
 
@@ -247,19 +254,29 @@ that framework's own tool functions, not adopting a new one.
 ## 9. Demo
 
 Try it live: **[wardenweb-production.up.railway.app](https://wardenweb-production.up.railway.app/)**.
-It runs the real compiled circuits against `LocalSimulatorNetwork` — every
-action is a real call into the real compiled `warden.compact` through
-`@midnight-ntwrk/compact-runtime`'s in-process simulator, hosted as a single
-persistent process (see [`docs/DEPLOY-RAILWAY.md`](docs/DEPLOY-RAILWAY.md)).
-It is **not** a live network: no part of this repository submits a
-transaction to Preview, Preprod, or Mainnet, and the UI's environment badge
-says `LOCAL SIMULATOR` for exactly this reason — on the live deployment too.
 
-- Shot-by-shot script for the current UI (for recording a walkthrough):
-  [`docs/DEMO-SCRIPT.md`](docs/DEMO-SCRIPT.md).
-- A command-line procedure to verify the same claims yourself, against
-  either the live deployment or a local run — no UI required:
-  [`docs/DEMO.md`](docs/DEMO.md).
+The hosted app can run in either of two backends, chosen by one server-side
+environment variable (`WARDEN_NETWORK`), never per-request and never
+silently — the environment badge always reflects which one is actually
+live:
+
+- **`DEMO · SIMULATOR`** (the default) — every action is a real call into
+  the real compiled `warden.compact` through
+  `@midnight-ntwrk/compact-runtime`'s in-process simulator: no proof server,
+  no live network, instant and funding-free.
+- **`LIVE · MIDNIGHT PREPROD`** — the app's own server-side API routes
+  execute the same mandate lifecycle against the real, already-deployed
+  Warden contract on the public Midnight Preprod network: real ZK proofs,
+  real transactions, the same path validated in
+  [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) (contract address, transaction
+  hashes, block numbers). The badge never claims this unless the
+  server-side connection has actually finished initializing — see
+  [`docs/DEPLOY-RAILWAY.md`](docs/DEPLOY-RAILWAY.md), "Live Preprod
+  backend" for the exact setup.
+
+A command-line procedure to verify the same claims yourself, against either
+the live deployment or a local run — no UI required:
+[`docs/DEMO.md`](docs/DEMO.md).
 
 ## 10. Non-guarantees
 
@@ -279,10 +296,9 @@ Full list with reasoning: [`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md) §9.
 
 ## 11. Run it, test it
 
-Verified against the real, current toolchain (see
-[`docs/IMPLEMENTATION-NOTES.md`](docs/IMPLEMENTATION-NOTES.md)) — Compact
-compiler **0.34.0**, `@midnight-ntwrk/compact-runtime@0.19.0`, Node 24, on
-Linux/macOS/WSL. No Docker required for any of the below.
+Verified against the real, current toolchain — Compact compiler **0.34.0**,
+`@midnight-ntwrk/compact-runtime@0.19.0`, Node 24, on Linux/macOS/WSL. No
+Docker required for any of the below.
 
 ```bash
 # 1. Install the Compact compiler (one-time, machine-wide):
@@ -333,23 +349,16 @@ to test names. Run all three with `npm test`.
 - **On-chain-verifiable actions only.** Warden proves an agent was
   authorized; it cannot and does not verify that an off-chain effect (an API
   call, a real-world purchase) occurred. Oracle problems are out of scope.
-- **The demo runs entirely against `LocalSimulatorNetwork`**, locally and on
-  the live deployment alike — see [§9](#9-demo).
-- **Live deployment is proven, on both a local devnet and the real public
-  Midnight Preprod network** — full mandate lifecycle (deploy,
-  `createMandate`, `authorize` within cap, `authorize` over cap correctly
-  rejected, `revoke`, post-revoke `authorize` correctly rejected), real ZK
-  proofs, real transactions. This requires compiling `warden.compact` with
-  an older Compact compiler (0.31.1) against the stable `midnight-js@4.1.1`
-  line rather than the current compiler (0.34.0) directly — the current
-  compiler's async circuit API has no currently-*stable* `midnight-js`
-  release that supports it yet. Both compiler versions accept the same,
-  unmodified security-fixed contract source. Real contract address,
-  mandate ID, transaction hashes, and block numbers from the Preprod run,
-  plus the full root-cause history, are in
-  [`docs/IMPLEMENTATION-NOTES.md`](docs/IMPLEMENTATION-NOTES.md). The Wave 1
-  deliverable itself doesn't depend on any of this — `packages/contracts`
-  runs on the current compiler throughout, exercised via the real
+- **The demo defaults to `LocalSimulatorNetwork`**, locally and on the
+  hosted deployment alike, unless the hosting environment explicitly opts
+  into the live Preprod backend (`WARDEN_NETWORK=preprod`) — see
+  [§9](#9-demo) and [`docs/DEPLOY-RAILWAY.md`](docs/DEPLOY-RAILWAY.md).
+- **Live deployment is proven** — on a local devnet, on the real public
+  Midnight Preprod network, and through the web app's own server/API path,
+  not just a standalone script. Full contract address, transaction hashes,
+  and block numbers: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). This does
+  not affect the Wave 1 deliverable itself — `packages/contracts` runs on
+  the current compiler (0.34.0) throughout, exercised via the real
   `@midnight-ntwrk/compact-runtime` simulator, the same methodology
   Midnight's own official example contracts use for their unit tests.
 - **Principal→agent handoff is not yet a secured channel.** The MVP
@@ -361,15 +370,14 @@ to test names. Run all three with `npm test`.
 
 ## 13. Roadmap
 
-**Wave 2 — the natural next evolution, not yet built.** A full protocol
-design for nested delegation (Principal → Agent → Sub-agent, where a child
-mandate can never grant more authority than its parent has remaining) has
-been written and adversarially reviewed:
-[`docs/WAVE-2-DELEGATION-DESIGN.md`](docs/WAVE-2-DELEGATION-DESIGN.md). It is
-a design document only — none of it is implemented in this repository. It
-also outlines a read-only auditor-disclosure circuit, richer policy
-composition, and an encrypted principal→agent handoff as further,
-not-yet-designed extensions.
+**Wave 2 — the natural next evolution, not yet built.** Nested delegation
+(Principal → Agent → Sub-agent, where a child mandate can never grant more
+authority than its parent has remaining), a read-only auditor-disclosure
+circuit, richer policy composition, and an encrypted principal→agent
+handoff. None of this is implemented in this repository — Wave 1 was
+frozen and audited deliberately before any Wave 2 design work began, on
+the belief that a smaller, provably-correct primitive beats a larger,
+shakier one.
 
 **Wave 3 — direction, not a plan.** An open SDK/protocol other agent
 frameworks integrate against, cross-contract composition once upstream
@@ -385,12 +393,8 @@ reputation/marketplace layer.
 | [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) | Attack list, each mapped to a named test. |
 | [`docs/PRIVACY.md`](docs/PRIVACY.md) | Field-by-field public/private/derived/inferable classification. |
 | [`docs/DEMO.md`](docs/DEMO.md) | Command-line judge/developer verification procedure. |
-| [`docs/DEMO-SCRIPT.md`](docs/DEMO-SCRIPT.md) | Shot-by-shot narration script for a recorded demo. |
-| [`docs/IMPLEMENTATION-NOTES.md`](docs/IMPLEMENTATION-NOTES.md) | Verified toolchain versions, real API shapes, the live-devnet investigation. |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Live Midnight Preprod deployment evidence — contract address, transaction hashes, block numbers. |
 | [`docs/DEPLOY-RAILWAY.md`](docs/DEPLOY-RAILWAY.md) | Deployment instructions for the live demo (`Dockerfile` at repo root). |
-| [`docs/WAVE-2-DELEGATION-DESIGN.md`](docs/WAVE-2-DELEGATION-DESIGN.md) | Nested-delegation protocol design — not implemented. |
-| [`docs/SUBMISSION-NARRATIVE.md`](docs/SUBMISSION-NARRATIVE.md) | Problem/product narrative for slides and pitch copy. |
-| [`docs/SUBMISSION-CHECKLIST.md`](docs/SUBMISSION-CHECKLIST.md) | Buildathon hard-requirement checklist with evidence. |
 
 ## License
 
