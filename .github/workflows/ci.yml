@@ -1,0 +1,27 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - name: Install Compact
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf https://github.com/midnightntwrk/compact/releases/latest/download/compact-installer.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/compact" update 0.34.0
+          "$HOME/.local/bin/compact" update 0.31.1 --no-set-default
+      - run: npm install --legacy-peer-deps
+      - name: Compile contract (technical gate: must compile with both compilers)
+        run: |
+          npm run compact:fast --workspace packages/contracts
+          npm run compact:legacy:fast --workspace apps/web
+      - run: npm run build --workspace packages/contracts
+      - run: npm run build --workspace packages/shared
+      - run: npm run build --workspace packages/sdk
+      - run: npm run build --workspace packages/agent-adapter
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build --workspace apps/web
