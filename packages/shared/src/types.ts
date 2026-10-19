@@ -18,7 +18,16 @@ export type ActionRequest = {
   destinationCategory: string;
 };
 
-export type MandateStatus = "active" | "revoked" | "expired" | "unknown";
+export type MandateStatus = "active" | "paused" | "revoked" | "expired" | "unknown";
+
+/** A selective-disclosure attestation published by the agent: "spend <= ceiling
+ * as of action number `atCount`". The real total is never revealed. */
+export type SpendAttestation = {
+  ceiling: string; // decimal string — bigint-safe over JSON
+  atCount: number;
+  /** True once more actions have been authorized since the attestation. */
+  stale: boolean;
+};
 
 /** Safe to display — never the policy itself unless the viewer is the principal. */
 export type MandateSummary = {
@@ -29,4 +38,13 @@ export type MandateSummary = {
    * state — re-randomized on every `authorize`, reveals no amount. Absent
    * for an unregistered id. */
   spentCommitment?: string;
+  kind?: "root" | "delegated";
+  /** Present on a delegated mandate (the tree shape is public by design). */
+  parentId?: string;
+  /** This mandate's own flags, before ancestors are considered. */
+  paused?: boolean;
+  /** Set when the mandate is unusable only because its parent is
+   * revoked / paused — its own ledger flags are untouched. */
+  blockedByParent?: "revoked" | "paused";
+  attestation?: SpendAttestation;
 };
