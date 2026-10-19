@@ -209,7 +209,7 @@ layer, not a security boundary:
   (`WARDEN_NETWORK=preprod`). Contract address, transaction hashes, and
   block numbers: `docs/DEPLOYMENT.md`. The hosted demo defaults to the
   in-process simulator and opts into this live path only when explicitly
-  configured — see `docs/DEPLOY-RAILWAY.md`.
+  configured — see `docs/DEPLOY-FREE.md`.
 
 ## 12. Wave 1 validation baseline
 

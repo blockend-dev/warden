@@ -148,7 +148,7 @@ docs/
   PRIVACY.md
   DEMO.md
   DEPLOYMENT.md          Live Preprod deployment evidence
-  DEPLOY-RAILWAY.md       Deployment instructions
+  DEPLOY-FREE.md       Deployment instructions
 ```
 
 ## 7. What Wave 1 deliberately does not include, and why

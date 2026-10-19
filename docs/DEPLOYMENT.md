@@ -1,7 +1,7 @@
 # Warden — Deployment Evidence
 
 This document is evidence, not instructions. For how to deploy `apps/web`
-to Railway, see [`docs/DEPLOY-RAILWAY.md`](DEPLOY-RAILWAY.md).
+to a free host, see [`docs/DEPLOY-FREE.md`](DEPLOY-FREE.md).
 
 ## Deployment status
 
@@ -15,7 +15,7 @@ submitted and included on-chain. The full mandate lifecycle —
 rejected), `revoke`, and a post-revoke `authorize` (correctly rejected) —
 was executed successfully, twice: once through a standalone validation
 script, and once through the web application's own server/API execution
-path (`WARDEN_NETWORK=preprod`) — the same code Railway runs.
+path (`WARDEN_NETWORK=preprod`) — the same code the hosted container runs.
 
 ## Deployed contract
 
@@ -91,10 +91,10 @@ distinction" below).
   the full mandate lifecycle (create, authorize twice, revoke, authorize
   again), not every circuit branch (e.g. action-count exhaustion was not
   separately exercised live; it is covered by the simulator suite).
-- **Not** a claim that the hosted Railway deployment has itself been
+- **Not** a claim that the hosted deployment has itself been
   verified live — the evidence above is from a local run of `apps/web`
-  against real Preprod, using the same code Railway runs. Whether the
-  actual hosted Railway service has `WARDEN_NETWORK=preprod` configured
+  against real Preprod, using the same code the hosted container runs. Whether the
+  actual hosted service has `WARDEN_NETWORK=preprod` configured
   and has completed its own sync is a separate, deployment-specific fact —
   check that deployment's own environment badge or
   `GET /api/network-status`, don't assume it from this document.
@@ -106,7 +106,7 @@ Two backends exist, and this repository never presents one as the other:
 - **`preprod`** (`WARDEN_NETWORK=preprod`) — real execution against
   Midnight Preprod, exactly as evidenced above. Requires a funded
   server-side wallet, a reachable proof server, and a multi-hour first
-  sync (see `docs/DEPLOY-RAILWAY.md`).
+  sync (see `docs/DEPLOY-FREE.md`).
 - **simulator** (the default when `WARDEN_NETWORK` is unset or anything
   else) — real compiled circuits executed in-process via
   `@midnight-ntwrk/compact-runtime`, no proof server, no live network.
