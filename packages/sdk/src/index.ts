@@ -1,6 +1,6 @@
-export { createWarden, WardenClient, type CreateMandateParams, type CreateWardenOptions, type MandateHandoff, type WardenRole } from "./client.js";
+export { createWarden, WardenClient, type DelegateParams, type CreateMandateParams, type CreateWardenOptions, type MandateHandoff, type WardenRole } from "./client.js";
 export { createIdentity, identityFromSecret, type Identity } from "./identity.js";
-export { LocalSimulatorNetwork, type LiveEvidence, type WardenBackend } from "./network.js";
+export { LocalSimulatorNetwork, type LiveEvidence, type WardenBackend, type CircuitName, type CallResult } from "./network.js";
 export {
   WardenError,
   MandateNotFoundError,
@@ -10,6 +10,9 @@ export {
   PolicyViolationError,
   NotAuthorizedError,
   StaleStateError,
+  DelegationError,
+  MandatePausedError,
+  AttestationError,
   NetworkUnavailableError,
   ProofGenerationError,
   InsufficientBalanceError,
@@ -19,4 +22,5 @@ export {
   classifyNetworkError,
   classifyLiveError
 } from "./errors.js";
-export type { PolicyInput, ActionRequest, MandateSummary, MandateStatus } from "@warden/shared";
+export type { PolicyInput, ActionRequest, MandateSummary, MandateStatus, SpendAttestation } from "@warden/shared";
+export { runAttackSuite, runSwarm, SCENARIO_COUNT, type ScenarioResult, type SwarmEvent, type SwarmResult } from "./lab.js";
