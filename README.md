@@ -14,8 +14,28 @@ mandate, by construction, not by convention.
 > and does not claim to, verify what an agent does off-chain — see
 > [Current limitations](#12-current-limitations).
 
-**Live demo:** [wardenweb-production.up.railway.app](https://wardenweb-production.up.railway.app/)
-— no setup required; see [§9](#9-demo) for exactly what it is and isn't.
+**Live demo:** _free-hosted container — URL goes here after deploy; see [`docs/DEPLOY-FREE.md`](docs/DEPLOY-FREE.md)._
+Or run it locally in two commands (§11). It runs the real compiled circuits
+in-process; see [§9](#9-demo) for exactly what it is and isn't.
+
+## What changed in Wave 2
+
+Wave 1 was one hop (Principal → Agent). Wave 2 turns it into a **trust tree**,
+all enforced in zero knowledge, all additive to the frozen Wave 1 circuits.
+Full detail and honest limits: [`docs/WAVE-2.md`](docs/WAVE-2.md).
+
+| New | What it does |
+|---|---|
+| **Nested delegation** — `delegate`, `authorizeDelegated`, `revokeDelegated` | The agent carves a bounded child mandate for a sub-agent. A child can never hold more than its parent has left; delegation spends the parent's budget immediately so siblings cannot double-allocate; the child cannot outlive its parent. |
+| **Cascade revocation** | Revoking the root kills every sub-agent instantly — the circuit live-checks the parent, so the child's own flag is never touched. |
+| **Pause / resume** — `pause`, `resume` | A reversible kill-switch that freezes the whole subtree without losing spend state. |
+| **Selective disclosure** — `attestSpend` | Prove "spent at most X" to an auditor; the ledger learns the ceiling, never the total. |
+| **Attack Lab** (`/lab`) | 19 adversarial scenarios and a seeded autonomous-agent swarm run against the real circuits. Every refusal is a circuit `assert`. |
+| **Public verifier** (`/verify`) | Paste any mandate id: see exactly what a third party can and cannot learn. |
+| **Redesigned UI** | White-family glassmorphism, anime.js motion, delegation graph, toasts, audit-packet export, in-app pitch deck (`/deck`). |
+
+Verification: **9 circuits** (was 3), **96 contract tests** (was 36), 24 SDK tests,
+3 adapter tests and **13 Playwright browser tests** — all passing.
 
 **Real Midnight Preprod deployment verified** — full mandate lifecycle,
 real ZK proofs, real on-chain transactions, executed through the web
@@ -89,7 +109,7 @@ Transaction fees still flow through the wallet/DUST layer on the Zswap
 side, transparently to the contract — Warden's circuits never see or touch
 it.
 
-## 4. Wave 1: what's actually built
+## 4. Wave 1: what was built (frozen; Wave 2 is additive)
 
 One Compact contract, three circuits, private policy enforcement,
 on-chain identity binding for both principal and agent, permanent on-chain
@@ -174,10 +194,10 @@ tied to a real-world fact — see [§10](#10-non-guarantees).
 ## 7. Midnight implementation
 
 - **Contract:** [`packages/contracts/src/warden.compact`](packages/contracts/src/warden.compact) — one file, `pragma language_version >= 0.20`, `import CompactStandardLibrary`.
-- **Ledger state (public):** `registered: Set<Bytes<32>>`, `revoked: Set<Bytes<32>>`, `spentCommitment: Map<Bytes<32>, Bytes<32>>`, `actionCount: Map<Bytes<32>, Counter>`.
-- **Circuits:** `createMandate(id)`, `authorize(id, amount, asset, actionType, destinationCategory)`, `revoke(id)`, plus exported pure helpers `pkOf`, `mandateId`, `spendCommitment` the SDK reuses client-side rather than reimplementing.
-- **Private state / witnesses:** [`packages/contracts/src/witnesses.ts`](packages/contracts/src/witnesses.ts) — `principalSecret`, `agentSecret`, `mandateContextOf`, `spentSoFar`, `spentNonce`, `freshNonce`. Every value a witness returns is untrusted by the circuit that calls it and is re-verified against a public commitment before anything depends on it — never assumed honest because it came from TypeScript rather than the proof.
-- **Commitment model:** domain-separated `persistentHash` calls (`"warden:pk:"`, `"warden:policy:"`, `"warden:mandate:"`, `"warden:spent:"`) so no two commitment types can collide — see [`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md) §3 for each primitive's exact definition and the invariant it provides.
+- **Ledger state (public):** `registered: Set<Bytes<32>>`, `revoked: Set<Bytes<32>>`, `spentCommitment: Map<Bytes<32>, Bytes<32>>`, `actionCount: Map<Bytes<32>, Counter>`; **Wave 2:** `paused: Set`, `delegatedFrom: Map<child, parent>`, `attestedCeiling` / `attestedAtCount: Map<Bytes<32>, Uint<64>>`.
+- **Circuits (9):** Wave 2 adds `delegate(parentId, childId)`, `authorizeDelegated(...)`, `revokeDelegated(id)`, `pause(id)`, `resume(id)`, `attestSpend(id, ceiling)`; Wave 1: `createMandate(id)`, `authorize(id, amount, asset, actionType, destinationCategory)`, `revoke(id)`, plus exported pure helpers `pkOf`, `mandateId`, `spendCommitment` the SDK reuses client-side rather than reimplementing.
+- **Private state / witnesses:** [`packages/contracts/src/witnesses.ts`](packages/contracts/src/witnesses.ts) — `principalSecret`, `agentSecret`, `mandateContextOf`, `delegatedMandateContextOf` (Wave 2), `spentSoFar`, `spentNonce`, `freshNonce`. Every value a witness returns is untrusted by the circuit that calls it and is re-verified against a public commitment before anything depends on it — never assumed honest because it came from TypeScript rather than the proof.
+- **Commitment model:** domain-separated `persistentHash` calls (`"warden:pk:"`, `"warden:policy:"`, `"warden:mandate:"`, `"warden:delegated:"`, `"warden:spent:"`) so no two commitment types can collide — see [`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md) §3 for each primitive's exact definition and the invariant it provides.
 - **Enforcement invariants:** the nine-step `authorize` list in [§5](#5-how-it-works), normatively listed in [`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md) §4.
 
 ## 8. SDK + Agent Adapter
@@ -253,7 +273,7 @@ that framework's own tool functions, not adopting a new one.
 
 ## 9. Demo
 
-Try it live: **[wardenweb-production.up.railway.app](https://wardenweb-production.up.railway.app/)**.
+Run it: `npm run dev --workspace apps/web` (§11), or deploy the free container ([`docs/DEPLOY-FREE.md`](docs/DEPLOY-FREE.md)). Click **Load live demo** on the dashboard for a populated session.
 
 The hosted app can run in either of two backends, chosen by one server-side
 environment variable (`WARDEN_NETWORK`), never per-request and never
@@ -271,7 +291,7 @@ live:
   [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) (contract address, transaction
   hashes, block numbers). The badge never claims this unless the
   server-side connection has actually finished initializing — see
-  [`docs/DEPLOY-RAILWAY.md`](docs/DEPLOY-RAILWAY.md), "Live Preprod
+  [`docs/DEPLOY-FREE.md`](docs/DEPLOY-FREE.md), "Live Preprod
   backend" for the exact setup.
 
 A command-line procedure to verify the same claims yourself, against either
@@ -330,8 +350,10 @@ npm run build --workspace apps/web       # next build, all routes
 
 | Suite | File | Count |
 |---|---|---|
-| Contract | [`packages/contracts/src/test/warden.test.ts`](packages/contracts/src/test/warden.test.ts) | 36 tests |
-| SDK | [`packages/sdk/src/client.test.ts`](packages/sdk/src/client.test.ts) | 9 tests |
+| Contract (Wave 1) | [`packages/contracts/src/test/warden.test.ts`](packages/contracts/src/test/warden.test.ts) | 36 tests |
+| Contract (Wave 2) | [`packages/contracts/src/test/wave2.test.ts`](packages/contracts/src/test/wave2.test.ts) | 60 tests |
+| SDK | [`client.test.ts`](packages/sdk/src/client.test.ts), [`wave2.test.ts`](packages/sdk/src/wave2.test.ts), [`lab.test.ts`](packages/sdk/src/lab.test.ts) | 9 + 12 + 3 tests |
+| Browser e2e | [`apps/web/e2e/warden.spec.ts`](apps/web/e2e/warden.spec.ts) | 13 tests (Playwright) |
 | Agent adapter | [`packages/agent-adapter/src/index.test.ts`](packages/agent-adapter/src/index.test.ts) | 3 tests |
 
 `warden.test.ts` runs real circuit calls through the Compact-runtime
@@ -352,7 +374,7 @@ to test names. Run all three with `npm test`.
 - **The demo defaults to `LocalSimulatorNetwork`**, locally and on the
   hosted deployment alike, unless the hosting environment explicitly opts
   into the live Preprod backend (`WARDEN_NETWORK=preprod`) — see
-  [§9](#9-demo) and [`docs/DEPLOY-RAILWAY.md`](docs/DEPLOY-RAILWAY.md).
+  [§9](#9-demo) and [`docs/DEPLOY-FREE.md`](docs/DEPLOY-FREE.md).
 - **Live deployment is proven** — on a local devnet, on the real public
   Midnight Preprod network, and through the web app's own server/API path,
   not just a standalone script. Full contract address, transaction hashes,
@@ -362,24 +384,28 @@ to test names. Run all three with `npm test`.
   `@midnight-ntwrk/compact-runtime` simulator, the same methodology
   Midnight's own official example contracts use for their unit tests.
 - **Principal→agent handoff is not yet a secured channel.** The MVP
-  colocates both roles' secrets in one demo session for simplicity; a real
-  encrypted handoff is a named Wave 2 item.
-- **Cross-contract hierarchical delegation is not yet possible** — a current
+  colocates the roles' secrets in one demo session for simplicity; a real
+  encrypted handoff is a named Wave 3 item.
+- **The nine-circuit Wave 2 contract is not yet deployed to Preprod** — the
+  live Wave 1 address has three circuits. Wave 2 is verified on the simulator
+  (96 contract tests) and compiles with both compiler versions;
+  see [`docs/WAVE-2.md`](docs/WAVE-2.md) §6.
+- **Delegation depth is one hop** (Principal → Agent → Sub-agent). Cross-contract hierarchical delegation is not yet possible — a current
   Compact composability limitation, not a Warden design gap. See
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §7.
 
 ## 13. Roadmap
 
-**Wave 2 — the natural next evolution, not yet built.** Nested delegation
-(Principal → Agent → Sub-agent, where a child mandate can never grant more
-authority than its parent has remaining), a read-only auditor-disclosure
-circuit, richer policy composition, and an encrypted principal→agent
-handoff. None of this is implemented in this repository — Wave 1 was
-frozen and audited deliberately before any Wave 2 design work began, on
-the belief that a smaller, provably-correct primitive beats a larger,
-shakier one.
+**Wave 2 — shipped** (see [`docs/WAVE-2.md`](docs/WAVE-2.md)): nested delegation
+(one hop), cascade revocation, pause/resume and the `attestSpend` auditor
+disclosure. **Still open from the original Wave 2 list:** richer policy
+composition (allow-lists) and an encrypted principal→agent handoff.
 
-**Wave 3 — direction, not a plan.** An open SDK/protocol other agent
+**Wave 3 — next.** Deploy the nine-circuit contract to Preprod and re-run the
+live lifecycle; deeper delegation chains and reservation reclaim on revoke;
+allow-list policies; the encrypted handoff channel.
+
+**Beyond.** An open SDK/protocol other agent
 frameworks integrate against, cross-contract composition once upstream
 Compact tooling supports it, and a privacy-preserving agent
 reputation/marketplace layer.
@@ -388,13 +414,14 @@ reputation/marketplace layer.
 
 | Doc | What it covers |
 |---|---|
+| [`docs/WAVE-2.md`](docs/WAVE-2.md) | **Wave 2**: delegation, pause, attestation — invariants, privacy cost, honest limits, reproduction. |
 | [`docs/WAVE-1-SPEC.md`](docs/WAVE-1-SPEC.md) | Authoritative frozen Wave 1 spec — invariants, cryptographic model, privacy boundary, validation baseline. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Full system design and the one-contract rationale. |
 | [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) | Attack list, each mapped to a named test. |
 | [`docs/PRIVACY.md`](docs/PRIVACY.md) | Field-by-field public/private/derived/inferable classification. |
 | [`docs/DEMO.md`](docs/DEMO.md) | Command-line judge/developer verification procedure. |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Live Midnight Preprod deployment evidence — contract address, transaction hashes, block numbers. |
-| [`docs/DEPLOY-RAILWAY.md`](docs/DEPLOY-RAILWAY.md) | Deployment instructions for the live demo (`Dockerfile` at repo root). |
+| [`docs/DEPLOY-FREE.md`](docs/DEPLOY-FREE.md) | Deployment instructions for the live demo (`Dockerfile` at repo root). |
 
 ## License
 

@@ -42,20 +42,20 @@ no other check matters if this doesn't pass.
 npm test
 ```
 
-Expect all three suites green: `packages/contracts` (36 tests, real circuit
+Expect all suites green: `packages/contracts` (96 tests: 36 Wave 1 + 60 Wave 2, real circuit
 calls through the Compact-runtime simulator against the compiled contract —
-no mocks), `packages/sdk` (9 tests, a genuine two-client principal/agent
+no mocks), `packages/sdk` (24 tests incl. the Attack Lab; a genuine three-party principal/agent/sub-agent
 flow), `packages/agent-adapter` (3 tests). Every attack in
 [`docs/THREAT-MODEL.md`](THREAT-MODEL.md) is a named test in this run, not a
 claim without evidence.
 
 ## 3. Verify the live protocol flow yourself
 
-Against the [live deployment](https://wardenweb-production.up.railway.app/)
+Against the live deployment (your free container — `docs/DEPLOY-FREE.md`)
 — or `npm run dev --workspace apps/web` and substitute `http://localhost:3000`:
 
 ```bash
-BASE=https://wardenweb-production.up.railway.app
+BASE=https://<your-space>.hf.space
 JAR=/tmp/warden-verify.jar
 
 # A real mandate id and status — not a mock:
@@ -111,3 +111,15 @@ and to avoid asking judges to fund a wallet; when a deployment sets
 already-deployed contract on Midnight Preprod instead — real ZK proofs,
 real transactions. See [`docs/DEPLOYMENT.md`](DEPLOYMENT.md) for the live
 evidence and which mode a given deployment is actually running.
+
+## Wave 2 — try the new features in two minutes
+
+1. `/` → **Load live demo**: a root mandate (cap 1000) with two delegated sub-agents (400 / 300) and a payment, all real circuit calls.
+2. On the root mandate, **Over-delegate attack** → refused: `delegated cap exceeds parent's remaining budget`.
+3. **Pause**, then try **Submit action** on a sub-agent: refused until you **Resume**.
+4. **Revoke (+2 sub-agents)** → the dashboard shows both children `revoked` with "Cut off by its parent"; their own ledger flags were never touched.
+5. **Attest** a ceiling, then **Attest a lie** → `attestation false: spend exceeds ceiling`.
+6. `/lab` → **Run all scenarios** (19/19 behave as promised) and the **Agent swarm** (seeded, reproducible).
+7. **Public view ↗** on any mandate → `/verify`: what a third party can and cannot see.
+
+Headless equivalents: `curl -X POST $BASE/api/lab -H 'content-type: application/json' -d '{}'` and `curl $BASE/api/verify/<mandate-id>`.
