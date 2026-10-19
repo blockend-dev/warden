@@ -16,26 +16,31 @@ export type LiveEvidence = {
   readonly contractAddress: string;
 };
 
-type CallResult = { ledger: Ledger; privateState: WardenPrivateState; evidence?: LiveEvidence };
+export type CallResult = { ledger: Ledger; privateState: WardenPrivateState; evidence?: LiveEvidence };
+
+/** Every state-changing circuit in warden.compact. */
+export type CircuitName =
+  | "createMandate"
+  | "authorize"
+  | "revoke"
+  | "pause"
+  | "resume"
+  | "attestSpend"
+  | "delegate"
+  | "authorizeDelegated"
+  | "revokeDelegated";
 
 /** Everything a `WardenClient` needs from "the chain", kept narrow so a real
  * network-backed provider is a drop-in replacement.
  *
  * `getLedger` is async because a real network-backed implementation has to
  * query it (an indexer round-trip) — `LocalSimulatorNetwork` just wraps its
- * in-memory state in an already-resolved promise. */
+ * in-memory state in an already-resolved promise. `call` invokes one circuit
+ * by name with its public arguments; a generic entry point so a new circuit
+ * is one more name, not one more method on every backend. */
 export interface WardenBackend {
   getLedger(): Promise<Ledger>;
-  createMandate(privateState: WardenPrivateState, id: Uint8Array): Promise<CallResult>;
-  authorize(
-    privateState: WardenPrivateState,
-    id: Uint8Array,
-    requestedAmount: bigint,
-    requestedAsset: Uint8Array,
-    requestedActionType: Uint8Array,
-    requestedDestinationCategory: Uint8Array
-  ): Promise<CallResult>;
-  revoke(privateState: WardenPrivateState, id: Uint8Array): Promise<CallResult>;
+  call(circuit: CircuitName, privateState: WardenPrivateState, args: unknown[]): Promise<CallResult>;
 }
 
 /**
@@ -74,38 +79,11 @@ export class LocalSimulatorNetwork implements WardenBackend {
     return ledger(this.state);
   }
 
-  async createMandate(privateState: WardenPrivateState, id: Uint8Array): Promise<CallResult> {
+  async call(circuit: CircuitName, privateState: WardenPrivateState, args: unknown[]): Promise<CallResult> {
     const contract = new Contract<WardenPrivateState>(witnesses);
-    const ctx = createCircuitContext("createMandate", this.address, this.zswap, this.state, privateState);
-    const res = await contract.impureCircuits.createMandate(ctx, id);
-    return this.commit(res.context);
-  }
-
-  async authorize(
-    privateState: WardenPrivateState,
-    id: Uint8Array,
-    requestedAmount: bigint,
-    requestedAsset: Uint8Array,
-    requestedActionType: Uint8Array,
-    requestedDestinationCategory: Uint8Array
-  ): Promise<CallResult> {
-    const contract = new Contract<WardenPrivateState>(witnesses);
-    const ctx = createCircuitContext("authorize", this.address, this.zswap, this.state, privateState);
-    const res = await contract.impureCircuits.authorize(
-      ctx,
-      id,
-      requestedAmount,
-      requestedAsset,
-      requestedActionType,
-      requestedDestinationCategory
-    );
-    return this.commit(res.context);
-  }
-
-  async revoke(privateState: WardenPrivateState, id: Uint8Array): Promise<CallResult> {
-    const contract = new Contract<WardenPrivateState>(witnesses);
-    const ctx = createCircuitContext("revoke", this.address, this.zswap, this.state, privateState);
-    const res = await contract.impureCircuits.revoke(ctx, id);
+    const ctx = createCircuitContext(circuit, this.address, this.zswap, this.state, privateState);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- circuits are looked up by name; their argument types are enforced by WardenClient
+    const res = await (contract.impureCircuits as any)[circuit](ctx, ...args);
     return this.commit(res.context);
   }
 
