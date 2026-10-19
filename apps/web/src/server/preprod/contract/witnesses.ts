@@ -14,7 +14,7 @@
 
 import type { WitnessContext } from "@midnight-ntwrk/compact-runtime";
 import type { Ledger } from "./managed/contract/index.js";
-import type { MandateContext } from "./types";
+import type { DelegatedMandateContext, MandateContext } from "./types";
 
 export type MandateRecord = {
   readonly context: MandateContext;
@@ -27,6 +27,8 @@ export type MandateRecord = {
   /** Set by the `freshNonce` witness while an `authorize` call is in
    * flight, cleared once the caller confirms the call landed. */
   readonly pendingNonce?: Uint8Array;
+  /** Set only on a delegated (child) mandate. */
+  readonly parentId?: Uint8Array;
 };
 
 export type WardenPrivateState = {
@@ -74,6 +76,15 @@ export const witnesses = {
   mandateContextOf: ({ privateState }: WitnessContext<Ledger, WardenPrivateState>, id: Uint8Array): [WardenPrivateState, MandateContext] => {
     const rec = requireRecord(privateState, id);
     return [privateState, rec.context];
+  },
+
+  delegatedMandateContextOf: (
+    { privateState }: WitnessContext<Ledger, WardenPrivateState>,
+    id: Uint8Array
+  ): [WardenPrivateState, DelegatedMandateContext] => {
+    const rec = requireRecord(privateState, id);
+    if (!rec.parentId) throw new Error("Warden: no local record for mandate " + idHex(id) + " as a delegated mandate (missing parent binding).");
+    return [privateState, { parentId: rec.parentId, ...rec.context }];
   },
 
   spentSoFar: ({ privateState }: WitnessContext<Ledger, WardenPrivateState>, id: Uint8Array): [WardenPrivateState, bigint] => {

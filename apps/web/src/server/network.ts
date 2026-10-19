@@ -1,9 +1,9 @@
 // Selects which WardenBackend the whole server process uses — set once, at
 // boot, from an environment variable, never per-request and never silently:
-// see docs/DEPLOY-RAILWAY.md, "Live Preprod backend" for why a per-visitor
+// see docs/DEPLOY-FREE.md, "Live Preprod backend" for why a per-visitor
 // or per-request toggle isn't the right shape here.
 //
-// `WARDEN_NETWORK=preprod` (the hosted Railway default) uses the real
+// `WARDEN_NETWORK=preprod` (the live-Preprod opt-in) uses the real
 // Midnight Preprod network via PreprodNetwork — see ./preprod/preprod-network.ts.
 // Anything else (the default for local dev) uses LocalSimulatorNetwork,
 // unchanged from before this module existed.

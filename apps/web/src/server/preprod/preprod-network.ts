@@ -65,7 +65,7 @@ import { NoOpTransactionHistoryStorage } from "@midnight-ntwrk/wallet-sdk-abstra
 import * as WardenContract from "./contract/managed/contract/index.js";
 import { emptyWardenPrivateState, witnesses, type WardenPrivateState as LegacyPrivateState } from "./contract/witnesses";
 
-import type { WardenBackend, LiveEvidence } from "@warden/sdk";
+import type { WardenBackend, LiveEvidence, CircuitName } from "@warden/sdk";
 import { NetworkUnavailableError, classifyLiveError } from "@warden/sdk";
 import type { Ledger, WardenPrivateState } from "@warden/contracts";
 
@@ -88,7 +88,7 @@ export type PreprodConfig = {
 };
 
 /** Reads config from environment variables — see .env.example for the full
- * list and docs/DEPLOY-RAILWAY.md for what each one does. Returns
+ * list and docs/DEPLOY-FREE.md for what each one does. Returns
  * `undefined` (not a thrown error) when live mode simply
  * isn't configured, so the caller can fall back to an honest "unconfigured"
  * status instead of a crash. */
@@ -353,40 +353,11 @@ export class PreprodNetwork implements WardenBackend {
     });
   }
 
-  createMandate(privateState: WardenPrivateState, id: Uint8Array) {
+  call(circuit: CircuitName, privateState: WardenPrivateState, args: unknown[]) {
     return enqueue(() =>
       callLive(async () => {
         requireReady();
-        const { result: finalized, nextPrivateState } = await withPrivateState(privateState, () => found.callTx.createMandate(id));
-        return { ledger: await this.getLedger(), privateState: nextPrivateState, evidence: evidenceOf(finalized) };
-      })
-    );
-  }
-
-  authorize(
-    privateState: WardenPrivateState,
-    id: Uint8Array,
-    requestedAmount: bigint,
-    requestedAsset: Uint8Array,
-    requestedActionType: Uint8Array,
-    requestedDestinationCategory: Uint8Array
-  ) {
-    return enqueue(() =>
-      callLive(async () => {
-        requireReady();
-        const { result: finalized, nextPrivateState } = await withPrivateState(privateState, () =>
-          found.callTx.authorize(id, requestedAmount, requestedAsset, requestedActionType, requestedDestinationCategory)
-        );
-        return { ledger: await this.getLedger(), privateState: nextPrivateState, evidence: evidenceOf(finalized) };
-      })
-    );
-  }
-
-  revoke(privateState: WardenPrivateState, id: Uint8Array) {
-    return enqueue(() =>
-      callLive(async () => {
-        requireReady();
-        const { result: finalized, nextPrivateState } = await withPrivateState(privateState, () => found.callTx.revoke(id));
+        const { result: finalized, nextPrivateState } = await withPrivateState(privateState, () => found.callTx[circuit](...args));
         return { ledger: await this.getLedger(), privateState: nextPrivateState, evidence: evidenceOf(finalized) };
       })
     );
