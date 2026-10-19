@@ -206,9 +206,11 @@ async function reportProgress(wallet: WalletFacade): Promise<void> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- progress lives on a nested wallet-sdk state object
     const st: any = await Rx.firstValueFrom(wallet.state());
     const p = st.shielded?.progress ?? st.shielded?.state?.progress;
+    const j = (x: unknown) => JSON.stringify(x, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
+    console.log("[warden] sync detail:", "isSynced", st.isSynced, "shielded", j(p), "unshielded", j(st.unshielded?.progress), "dust", j(st.dust?.progress ?? st.dust?.state?.progress));
     if (!p || status.phase !== "syncing") return;
     const applied = Number(p.appliedIndex);
-    const highest = Number(p.highestIndex);
+    const highest = Number(p.highestRelevantWalletIndex) || Number(p.highestIndex);
     if (highest > 0) {
       const detail = `syncing wallet ${((applied / highest) * 100).toFixed(1)}% (${applied.toLocaleString()} / ${highest.toLocaleString()})`;
       status = { phase: "syncing", detail };
