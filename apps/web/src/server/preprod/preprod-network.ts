@@ -102,6 +102,7 @@ export function readPreprodConfig(): PreprodConfig | undefined {
     throw new Error("WARDEN_NETWORK=preprod requires WARDEN_PREPROD_SEED (64 hex chars) to be set.");
   }
   const deployOnBoot = process.env.WARDEN_DEPLOY_CONTRACT === "1";
+  const endpoints = preprodEndpoints(process.env.BLOCKFROST_PROJECT_ID?.trim());
   if (!contractAddress && !deployOnBoot) {
     throw new Error(
       "WARDEN_NETWORK=preprod requires WARDEN_CONTRACT_ADDRESS (the deployed contract's address), or WARDEN_DEPLOY_CONTRACT=1 to deploy a fresh one on first boot."
@@ -111,10 +112,31 @@ export function readPreprodConfig(): PreprodConfig | undefined {
     seed,
     contractAddress: contractAddress ?? "",
     deployOnBoot,
-    indexer: process.env.WARDEN_PREPROD_INDEXER ?? "https://indexer.preprod.midnight.network/api/v4/graphql",
-    indexerWS: process.env.WARDEN_PREPROD_INDEXER_WS ?? "wss://indexer.preprod.midnight.network/api/v4/graphql/ws",
-    node: process.env.WARDEN_PREPROD_NODE ?? "https://rpc.preprod.midnight.network",
+    indexer: process.env.WARDEN_PREPROD_INDEXER ?? endpoints.indexer,
+    indexerWS: process.env.WARDEN_PREPROD_INDEXER_WS ?? endpoints.indexerWS,
+    node: process.env.WARDEN_PREPROD_NODE ?? endpoints.node,
     proofServer: process.env.WARDEN_PROOF_SERVER_URL ?? "http://127.0.0.1:6300"
+  };
+}
+
+/** Midnight decommissioned its hosted Preprod indexer and RPC on 2026-10-09;
+ * Preprod is now served by Blockfrost, which takes the project token as a
+ * `project_id` query parameter on every URL (same shape as the official
+ * example-bboard migration). Without BLOCKFROST_PROJECT_ID this falls back to
+ * the retired hosts, which only make sense for older, self-hosted setups. */
+function preprodEndpoints(projectId: string | undefined) {
+  if (!projectId) {
+    return {
+      indexer: "https://indexer.preprod.midnight.network/api/v4/graphql",
+      indexerWS: "wss://indexer.preprod.midnight.network/api/v4/graphql/ws",
+      node: "https://rpc.preprod.midnight.network"
+    };
+  }
+  const key = `?project_id=${encodeURIComponent(projectId)}`;
+  return {
+    indexer: `https://midnight-preprod.blockfrost.io/api/v0${key}`,
+    indexerWS: `wss://midnight-preprod.blockfrost.io/api/v0/ws${key}`,
+    node: `https://rpc.midnight-preprod.blockfrost.io${key}`
   };
 }
 
@@ -177,8 +199,31 @@ async function saveSnapshot(wallet: WalletFacade): Promise<void> {
   }
 }
 
+/** Surfaces real sync progress (applied / highest chain index) in the status
+ * detail while the wallet catches up, so an hours-long first sync is visible. */
+async function reportProgress(wallet: WalletFacade): Promise<void> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- progress lives on a nested wallet-sdk state object
+    const st: any = await Rx.firstValueFrom(wallet.state());
+    const p = st.shielded?.progress ?? st.shielded?.state?.progress;
+    if (!p || status.phase !== "syncing") return;
+    const applied = Number(p.appliedIndex);
+    const highest = Number(p.highestIndex);
+    if (highest > 0) {
+      const detail = `syncing wallet ${((applied / highest) * 100).toFixed(1)}% (${applied.toLocaleString()} / ${highest.toLocaleString()})`;
+      status = { phase: "syncing", detail };
+      console.log(`[warden] ${detail}`);
+    }
+  } catch {
+    // progress is informational only
+  }
+}
+
 function startSnapshotting(wallet: WalletFacade): void {
-  const timer = setInterval(() => void saveSnapshot(wallet), 60_000);
+  const timer = setInterval(() => {
+    void saveSnapshot(wallet);
+    void reportProgress(wallet);
+  }, 60_000);
   timer.unref();
   const flush = () => {
     void saveSnapshot(wallet).finally(() => process.exit(0));
