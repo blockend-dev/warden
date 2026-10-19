@@ -1,0 +1,13 @@
+# Render blueprint: runs the prebuilt image published by .github/workflows/image.yml.
+# Replace <github-owner> (lowercase) and make the GHCR package public.
+services:
+  - type: web
+    name: warden
+    runtime: image
+    image:
+      url: ghcr.io/<github-owner>/warden-web:latest
+    plan: free
+    healthCheckPath: /api/network-status
+    envVars:
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
