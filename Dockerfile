@@ -1,4 +1,4 @@
-# One image for every host: Hugging Face Spaces (free), Render, Fly, Railway,
+# One image for every host: Render (free), Fly, Railway,
 # or a plain VPS. Runs `apps/web` as ONE persistent Node process — required,
 # not optional, because the demo session store lives in server memory (see
 # apps/web/src/lib/demo-session.ts) and does not survive being split across
@@ -56,7 +56,7 @@ RUN if [ "$WITH_PREPROD" = "1" ]; then \
 
 RUN npm run build --workspace apps/web
 
-# Hosts like Hugging Face Spaces run containers as uid 1000 (the base image's
+# Hosts commonly run containers as a non-root uid 1000 (the base image's
 # `node` user). The server writes only under /app (Next cache, wallet LevelDB).
 RUN chown -R node:node /app
 USER node
@@ -65,6 +65,6 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
     PORT=7860
-# 7860 is Hugging Face's default; Railway/Render/Fly inject their own $PORT.
+# Render, Railway and Fly inject their own $PORT, which overrides this default.
 EXPOSE 7860
 CMD ["npm", "run", "start", "--workspace", "apps/web"]
