@@ -11,7 +11,7 @@ export {
   type PureCircuits
 } from "./managed/warden/contract/index.js";
 
-export type { Policy, MandateContext } from "./types.js";
+export type { Policy, MandateContext, DelegatedMandateContext } from "./types.js";
 
 export {
   witnesses,

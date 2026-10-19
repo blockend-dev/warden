@@ -17,3 +17,10 @@ export type MandateContext = {
   agentPk: Uint8Array;
   policy: Policy;
 };
+
+export type DelegatedMandateContext = {
+  parentId: Uint8Array;
+  principalPk: Uint8Array;
+  agentPk: Uint8Array;
+  policy: Policy;
+};
