@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { fromHex } from "@warden/shared";
-import { findHandoff } from "@/lib/demo-session";
+import { actingClient, findHandoff } from "@/lib/demo-session";
 import { describeError } from "@/lib/api-error";
 import { withSession } from "@/lib/with-session";
 
@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     }
 
     try {
-      const evidence = await session.agent.authorize(fromHex(body.id), {
+      const evidence = await actingClient(session, handoff).authorize(fromHex(body.id), {
         amount: BigInt(body.amount),
         asset: body.asset,
         actionType: body.actionType,

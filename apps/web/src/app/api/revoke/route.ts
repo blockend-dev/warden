@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { fromHex } from "@warden/shared";
-import { findHandoff } from "@/lib/demo-session";
+import { controllingClient, findHandoff } from "@/lib/demo-session";
 import { describeError } from "@/lib/api-error";
 import { withSession } from "@/lib/with-session";
 
+/** Permanent. Root mandate: the principal revokes. Delegated mandate: the
+ * delegating agent (the child's principal) revokes. */
 export async function POST(request: Request) {
   const body = await request.json();
 
@@ -14,7 +16,7 @@ export async function POST(request: Request) {
     }
 
     try {
-      const evidence = await session.principal.revoke(fromHex(body.id));
+      const evidence = await controllingClient(session, handoff).revoke(fromHex(body.id));
       const status = await session.principal.status(handoff.id);
       return NextResponse.json({ revoked: true, status, evidence });
     } catch (cause) {

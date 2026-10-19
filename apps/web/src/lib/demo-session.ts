@@ -8,7 +8,7 @@
 //
 // Deliberately still in-memory, not a database: correct for a single
 // long-lived Node process (the deployment target documented in
-// docs/DEPLOY-RAILWAY.md), not for a serverless/multi-instance host where
+// docs/DEPLOY-FREE.md), not for a serverless/multi-instance host where
 // separate requests may land on separate processes.
 
 import { createWarden, type MandateHandoff, type WardenClient } from "@warden/sdk";
@@ -18,6 +18,8 @@ import { getNetwork } from "@/server/network";
 export type DemoSession = {
   principal: WardenClient;
   agent: WardenClient;
+  /** Sub-agent identity: acts only under mandates delegated by `agent`. */
+  sub: WardenClient;
   handoffs: Map<string, MandateHandoff>; // key: mandate id, hex — insertion order preserved
 };
 
@@ -45,6 +47,7 @@ function fresh(): DemoSession {
   return {
     principal: createWarden({ role: "principal", network }),
     agent: createWarden({ role: "agent", network }),
+    sub: createWarden({ role: "agent", network }),
     handoffs: new Map()
   };
 }
@@ -71,6 +74,18 @@ export function resetDemoSession(sessionId: string): DemoSession {
 
 export function rememberMandate(session: DemoSession, handoff: MandateHandoff): void {
   session.handoffs.set(toHex(handoff.id), handoff);
+}
+
+/** The client holding the *acting* secret for a mandate: the sub-agent for a
+ * delegated mandate, the agent for a root one. */
+export function actingClient(session: DemoSession, handoff: MandateHandoff): WardenClient {
+  return handoff.parentId ? session.sub : session.agent;
+}
+
+/** The client holding the *controlling* secret: the delegating agent for a
+ * delegated mandate, the principal for a root one. */
+export function controllingClient(session: DemoSession, handoff: MandateHandoff): WardenClient {
+  return handoff.parentId ? session.agent : session.principal;
 }
 
 export function findHandoff(session: DemoSession, idHex: string): MandateHandoff | undefined {
