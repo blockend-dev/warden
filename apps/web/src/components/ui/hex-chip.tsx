@@ -12,7 +12,9 @@ function shorten(hex: string, head = 8, tail = 6): string {
 export function HexChip({ value, label }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
 
-  async function copy() {
+  async function copy(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
@@ -28,10 +30,10 @@ export function HexChip({ value, label }: { value: string; label?: string }) {
       onClick={copy}
       title={value}
       aria-label={label ? `Copy ${label}` : "Copy value"}
-      className="group inline-flex items-center gap-1.5 rounded-md border border-white/10 bg-black/40 px-2 py-1 font-mono text-xs text-slate-300 transition hover:border-white/25 hover:text-slate-100"
+      className="group inline-flex items-center gap-1.5 rounded-lg border border-slate-900/10 bg-white/80 px-2 py-1 font-mono text-xs text-slate-700 transition hover:border-sky-500/40 hover:bg-white hover:text-slate-900"
     >
       <span>{shorten(value)}</span>
-      <span className="text-slate-600 transition group-hover:text-slate-400">{copied ? "✓" : "⧉"}</span>
+      <span className={`transition ${copied ? "text-emerald-600" : "text-slate-400 group-hover:text-sky-600"}`}>{copied ? "✓" : "⧉"}</span>
     </button>
   );
 }

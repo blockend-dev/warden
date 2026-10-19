@@ -5,8 +5,9 @@
 // This component renders that gap. Every field passed in must be real —
 // see callers for where each value actually comes from.
 
-import { useState } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { useRef, useState } from "react";
+import { animate } from "animejs";
+import { prefersReducedMotion } from "@/lib/motion";
 
 export type BoundaryField = {
   key: string;
@@ -18,50 +19,60 @@ export type BoundaryField = {
 type Column = {
   title: string;
   caption: string;
-  accent: "private" | "public" | "derived" | "off";
+  accent: "private" | "public" | "derived";
   fields: BoundaryField[];
 };
 
 const ACCENT: Record<Column["accent"], { text: string; ring: string; dot: string }> = {
-  private: { text: "text-private", ring: "border-private/30 bg-private/[0.06]", dot: "bg-private" },
-  public: { text: "text-public", ring: "border-public/30 bg-public/[0.06]", dot: "bg-public" },
-  derived: { text: "text-slate-300", ring: "border-white/15 bg-white/[0.03]", dot: "bg-slate-400" },
-  off: { text: "text-slate-500", ring: "border-white/10 bg-transparent", dot: "bg-slate-600" }
+  private: { text: "text-private", ring: "border-violet-500/25 bg-violet-50/70", dot: "bg-private" },
+  public: { text: "text-public", ring: "border-sky-500/25 bg-sky-50/70", dot: "bg-public" },
+  derived: { text: "text-slate-700", ring: "border-slate-900/10 bg-white/60", dot: "bg-slate-400" }
 };
 
 function FieldRow({ field, accent }: { field: BoundaryField; accent: Column["accent"] }) {
   const [open, setOpen] = useState(false);
+  const note = useRef<HTMLDivElement>(null);
   const style = ACCENT[accent];
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    const el = note.current;
+    if (!el) return;
+    if (prefersReducedMotion()) {
+      el.style.height = next ? "auto" : "0px";
+      el.style.opacity = next ? "1" : "0";
+      return;
+    }
+    if (next) {
+      el.style.height = "0px";
+      const target = el.scrollHeight;
+      animate(el, { height: [0, target], opacity: [0, 1], duration: 320, ease: "outCubic", onComplete: () => (el.style.height = "auto") });
+    } else {
+      animate(el, { height: [el.scrollHeight, 0], opacity: [1, 0], duration: 240, ease: "inCubic" });
+    }
+  }
+
   return (
     <li className="rounded-lg">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggle}
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-white/[0.04]"
+        className="flex w-full items-center justify-between gap-3 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-white/70"
       >
-        <span className="flex items-center gap-2 text-sm text-slate-300">
+        <span className="flex items-center gap-2 text-sm text-slate-800">
           <span className={`h-1.5 w-1.5 flex-none rounded-full ${style.dot}`} />
           {field.label}
         </span>
         <span className="flex items-center gap-2">
-          {field.value && <span className="font-mono text-xs text-slate-500">{field.value}</span>}
-          <span className="text-slate-600">{open ? "–" : "+"}</span>
+          {field.value && <span className="max-w-[9rem] truncate font-mono text-xs text-slate-500">{field.value}</span>}
+          <span className="text-slate-400">{open ? "–" : "+"}</span>
         </span>
       </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18, ease: "easeOut" }}
-            className="overflow-hidden"
-          >
-            <p className="px-2.5 pb-2 pt-0.5 text-xs leading-relaxed text-slate-500">{field.note}</p>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <div ref={note} className="overflow-hidden" style={{ height: 0, opacity: 0 }}>
+        <p className="px-2.5 pb-2 pt-0.5 text-xs leading-relaxed text-slate-600">{field.note}</p>
+      </div>
     </li>
   );
 }
@@ -87,11 +98,11 @@ export function PrivacyBoundary({
     <div className="flex flex-col gap-4">
       <div className="grid gap-3 sm:grid-cols-3">
         {columns.map((col) => (
-          <div key={col.title} className={`rounded-xl border p-3 ${ACCENT[col.accent].ring}`}>
+          <div key={col.title} className={`rounded-2xl border p-3 ${ACCENT[col.accent].ring}`}>
             <div className={`mb-0.5 text-xs font-semibold uppercase tracking-wide ${ACCENT[col.accent].text}`}>{col.title}</div>
             <div className="mb-2 text-[11px] text-slate-500">{col.caption}</div>
             {col.fields.length === 0 ? (
-              <p className="px-2.5 py-1 text-xs text-slate-600">None</p>
+              <p className="px-2.5 py-1 text-xs text-slate-400">None</p>
             ) : (
               <ul className="flex flex-col gap-0.5">
                 {col.fields.map((f) => (
@@ -103,12 +114,12 @@ export function PrivacyBoundary({
         ))}
       </div>
       {notProven.length > 0 && (
-        <div className={`rounded-xl border p-3 ${ACCENT.off.ring}`}>
+        <div className="rounded-2xl border border-slate-900/10 bg-white/50 p-3">
           <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Not proven</div>
           <ul className="flex flex-col gap-1">
             {notProven.map((claim) => (
-              <li key={claim} className="flex items-start gap-2 text-xs leading-relaxed text-slate-500">
-                <span className="mt-0.5 text-slate-600">–</span>
+              <li key={claim} className="flex items-start gap-2 text-xs leading-relaxed text-slate-600">
+                <span className="mt-0.5 text-slate-400">–</span>
                 {claim}
               </li>
             ))}

@@ -8,8 +8,8 @@ import type { LiveEvidence } from "@warden/sdk";
 
 export function LiveEvidencePanel({ evidence }: { evidence: LiveEvidence }) {
   return (
-    <div className="mt-3 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3">
-      <p className="text-[10px] font-medium uppercase tracking-[0.1em] text-emerald-400">Verified on Midnight Preprod</p>
+    <div className="mt-3 rounded-xl border border-emerald-500/25 bg-emerald-50/80 p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700">Verified on Midnight Preprod</p>
       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
         <dt className="text-slate-500">Transaction</dt>
         <dd className="mono-chip truncate">{evidence.txId}</dd>
