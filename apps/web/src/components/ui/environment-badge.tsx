@@ -19,7 +19,7 @@ type NetworkStatus =
   | { mode: "simulator" }
   | { mode: "preprod"; phase: "starting" }
   | { mode: "preprod"; phase: "syncing"; detail: string }
-  | { mode: "preprod"; phase: "ready"; contractAddress: string; network: string }
+  | { mode: "preprod"; phase: "ready"; contractAddress: string; network: string; deployment?: { txId: string; blockHeight: number } }
   | { mode: "preprod"; phase: "error"; detail: string };
 
 const POLL_MS = 15_000;

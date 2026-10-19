@@ -47,7 +47,7 @@ import { WebSocket } from "ws";
 import { CompiledContract } from "@midnight-ntwrk/midnight-js-protocol/compact-js";
 import * as ledgerV8 from "@midnight-ntwrk/ledger-v8";
 import { unshieldedToken } from "@midnight-ntwrk/ledger-v8";
-import { findDeployedContract, getPublicStates } from "@midnight-ntwrk/midnight-js/contracts";
+import { deployContract, findDeployedContract, getPublicStates } from "@midnight-ntwrk/midnight-js/contracts";
 import { setNetworkId, getNetworkId } from "@midnight-ntwrk/midnight-js/network-id";
 import { httpClientProofProvider } from "@midnight-ntwrk/midnight-js-http-client-proof-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
@@ -81,6 +81,8 @@ const privateStateId = "warden-web-live";
 export type PreprodConfig = {
   seed: string;
   contractAddress: string;
+  /** Deploy a fresh contract on first boot when no address is configured. */
+  deployOnBoot?: boolean;
   indexer: string;
   indexerWS: string;
   node: string;
@@ -99,12 +101,16 @@ export function readPreprodConfig(): PreprodConfig | undefined {
   if (!seed || !/^[0-9a-f]{64}$/i.test(seed)) {
     throw new Error("WARDEN_NETWORK=preprod requires WARDEN_PREPROD_SEED (64 hex chars) to be set.");
   }
-  if (!contractAddress) {
-    throw new Error("WARDEN_NETWORK=preprod requires WARDEN_CONTRACT_ADDRESS (the deployed contract's address) to be set.");
+  const deployOnBoot = process.env.WARDEN_DEPLOY_CONTRACT === "1";
+  if (!contractAddress && !deployOnBoot) {
+    throw new Error(
+      "WARDEN_NETWORK=preprod requires WARDEN_CONTRACT_ADDRESS (the deployed contract's address), or WARDEN_DEPLOY_CONTRACT=1 to deploy a fresh one on first boot."
+    );
   }
   return {
     seed,
-    contractAddress,
+    contractAddress: contractAddress ?? "",
+    deployOnBoot,
     indexer: process.env.WARDEN_PREPROD_INDEXER ?? "https://indexer.preprod.midnight.network/api/v4/graphql",
     indexerWS: process.env.WARDEN_PREPROD_INDEXER_WS ?? "wss://indexer.preprod.midnight.network/api/v4/graphql/ws",
     node: process.env.WARDEN_PREPROD_NODE ?? "https://rpc.preprod.midnight.network",
@@ -115,7 +121,7 @@ export function readPreprodConfig(): PreprodConfig | undefined {
 export type PreprodStatus =
   | { phase: "starting" }
   | { phase: "syncing"; detail: string }
-  | { phase: "ready"; contractAddress: string; network: string }
+  | { phase: "ready"; contractAddress: string; network: string; deployment?: { txId: string; blockHeight: number } }
   | { phase: "error"; detail: string };
 
 let status: PreprodStatus = { phase: "starting" };
@@ -271,14 +277,35 @@ export function ensurePreprodInit(config: PreprodConfig): Promise<void> {
         (CompiledContract.withWitnesses as any)(witnesses),
         (CompiledContract.withCompiledFileAssets as any)(zkConfigPath)
       );
-      found = await findDeployedContract(providers as any, {
-        compiledContract,
-        contractAddress: cfg.contractAddress,
-        privateStateId,
-        initialPrivateState: emptyWardenPrivateState()
-      } as any);
+      let deployment: { txId: string; blockHeight: number } | undefined;
+      if (!cfg.contractAddress) {
+        // First boot with WARDEN_DEPLOY_CONTRACT=1: deploy in this same process,
+        // which already holds the synced wallet (a second process would pay the
+        // multi-hour sync again). The address and deploy transaction are written
+        // to .deployed-contract.json so they can be recorded as evidence.
+        status = { phase: "syncing", detail: "deploying the Warden contract (real proof + transaction)" };
+        const deployed: any = await deployContract(providers as any, {
+          compiledContract,
+          privateStateId,
+          initialPrivateState: emptyWardenPrivateState()
+        } as any);
+        cfg.contractAddress = deployed.deployTxData.public.contractAddress;
+        deployment = { txId: deployed.deployTxData.public.txId, blockHeight: deployed.deployTxData.public.blockHeight };
+        fs.writeFileSync(
+          path.resolve(process.cwd(), ".deployed-contract.json"),
+          JSON.stringify({ contractAddress: cfg.contractAddress, network: "Midnight Preprod", ...deployment, deployedAt: new Date().toISOString() }, null, 2)
+        );
+        found = deployed;
+      } else {
+        found = await findDeployedContract(providers as any, {
+          compiledContract,
+          contractAddress: cfg.contractAddress,
+          privateStateId,
+          initialPrivateState: emptyWardenPrivateState()
+        } as any);
+      }
 
-      status = { phase: "ready", contractAddress: cfg.contractAddress, network: "Midnight Preprod" };
+      status = { phase: "ready", contractAddress: cfg.contractAddress, network: "Midnight Preprod", deployment };
     } catch (cause) {
       const detail = cause instanceof Error ? cause.message : String(cause);
       status = { phase: "error", detail };
