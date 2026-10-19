@@ -55,7 +55,7 @@ Against the live deployment (your free container — `docs/DEPLOY-FREE.md`)
 — or `npm run dev --workspace apps/web` and substitute `http://localhost:3000`:
 
 ```bash
-BASE=https://<your-space>.hf.space
+BASE=https://<your-service>.onrender.com
 JAR=/tmp/warden-verify.jar
 
 # A real mandate id and status — not a mock:
