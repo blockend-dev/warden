@@ -81,29 +81,39 @@ export class WardenSimulator {
     this.privateState = context.callContext.currentPrivateState as WardenPrivateState;
   }
 
-  /** Folds a `freshNonce` call's pending nonce into confirmed state after a
-   * successful call (mirrors `client.ts`'s `finalizeAfterCall`). */
-  private confirmNonce(id: Uint8Array, amountJustSpent: bigint): void {
-    const rec = this.privateState.mandates[idHex(id)];
-    if (!rec?.pendingNonce) return;
-    this.privateState = withMandate(this.privateState, id, {
-      ...rec,
-      spentTotal: rec.spentTotal + amountJustSpent,
-      spentNonce: rec.pendingNonce,
-      pendingNonce: undefined
-    });
+  /** Folds every in-flight `freshNonce` into confirmed state after a
+   * successful call (mirrors `client.ts`'s `finalizeAfterCall`). `spends` maps
+   * a mandate id to the amount that call debited from it. */
+  private confirmNonces(spends: Array<[Uint8Array, bigint]>): void {
+    for (const [id, amount] of spends) {
+      const rec = this.privateState.mandates[idHex(id)];
+      if (!rec?.pendingNonce) continue;
+      this.privateState = withMandate(this.privateState, id, {
+        ...rec,
+        spentTotal: rec.spentTotal + amount,
+        spentNonce: rec.pendingNonce,
+        pendingNonce: undefined
+      });
+    }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async run(circuit: string, atTime: bigint | undefined, args: any[], spends: Array<[Uint8Array, bigint]> = []): Promise<Ledger> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const fn = (this.contract.impureCircuits as any)[circuit];
+    const res = await fn(this.buildContext(circuit, atTime), ...args);
+    this.commit(res.context);
+    this.confirmNonces(spends);
+    return this.getLedger();
   }
 
   /** `atTime` (Unix seconds) is what `blockTimeLte` sees as "now"; omit for
    * wall-clock time. */
-  async createMandate(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
-    const res = await this.contract.impureCircuits.createMandate(this.buildContext("createMandate", atTime), id);
-    this.commit(res.context);
-    this.confirmNonce(id, 0n);
-    return this.getLedger();
+  createMandate(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
+    return this.run("createMandate", atTime, [id], [[id, 0n]]);
   }
 
-  async authorize(
+  authorize(
     id: Uint8Array,
     requestedAmount: bigint,
     requestedAsset: Uint8Array,
@@ -111,23 +121,51 @@ export class WardenSimulator {
     requestedDestinationCategory: Uint8Array,
     atTime?: bigint
   ): Promise<Ledger> {
-    const res = await this.contract.impureCircuits.authorize(
-      this.buildContext("authorize", atTime),
-      id,
-      requestedAmount,
-      requestedAsset,
-      requestedActionType,
-      requestedDestinationCategory
-    );
-    this.commit(res.context);
-    this.confirmNonce(id, requestedAmount);
-    return this.getLedger();
+    return this.run("authorize", atTime, [id, requestedAmount, requestedAsset, requestedActionType, requestedDestinationCategory], [[id, requestedAmount]]);
   }
 
-  async revoke(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
-    const res = await this.contract.impureCircuits.revoke(this.buildContext("revoke", atTime), id);
-    this.commit(res.context);
-    return this.getLedger();
+  revoke(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
+    return this.run("revoke", atTime, [id]);
+  }
+
+  pause(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
+    return this.run("pause", atTime, [id]);
+  }
+
+  resume(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
+    return this.run("resume", atTime, [id]);
+  }
+
+  attestSpend(id: Uint8Array, ceiling: bigint, atTime?: bigint): Promise<Ledger> {
+    return this.run("attestSpend", atTime, [id, ceiling]);
+  }
+
+  /** The parent's agent debits `childCap` from the parent and registers the child. */
+  delegate(parentId: Uint8Array, childId: Uint8Array, childCap: bigint, atTime?: bigint): Promise<Ledger> {
+    return this.run("delegate", atTime, [parentId, childId], [
+      [parentId, childCap],
+      [childId, 0n]
+    ]);
+  }
+
+  authorizeDelegated(
+    id: Uint8Array,
+    requestedAmount: bigint,
+    requestedAsset: Uint8Array,
+    requestedActionType: Uint8Array,
+    requestedDestinationCategory: Uint8Array,
+    atTime?: bigint
+  ): Promise<Ledger> {
+    return this.run(
+      "authorizeDelegated",
+      atTime,
+      [id, requestedAmount, requestedAsset, requestedActionType, requestedDestinationCategory],
+      [[id, requestedAmount]]
+    );
+  }
+
+  revokeDelegated(id: Uint8Array, atTime?: bigint): Promise<Ledger> {
+    return this.run("revokeDelegated", atTime, [id]);
   }
 }
 

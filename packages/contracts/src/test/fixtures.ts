@@ -71,3 +71,44 @@ export const buildMandate = (
 export const seedPrivateState = (record: MandateRecord, id: Uint8Array): WardenPrivateState => ({
   mandates: { [Buffer.from(id).toString("hex")]: record }
 });
+
+/** Builds a delegated (child) mandate carved out of `parent`. The delegating
+ * agent is the parent's agent, so the child's principal secret is the
+ * parent's agent secret; `subAgentSeed` seeds the new sub-agent. */
+export const buildDelegated = (
+  parent: ReturnType<typeof buildMandate>,
+  subAgentSeed: number,
+  policyInput: Partial<PolicyInput> & { maxAmount: bigint },
+  overrides: { parentId?: Uint8Array } = {}
+) => {
+  const subAgentSecret = randomBytes32(subAgentSeed);
+  const parentId = overrides.parentId ?? parent.id;
+  const principalPk = parent.context.agentPk;
+  const agentPk = pureCircuits.pkOf(subAgentSecret);
+
+  const policy = {
+    maxAmount: policyInput.maxAmount,
+    asset: policyInput.asset !== undefined ? category(policyInput.asset) : parent.context.policy.asset,
+    actionType: policyInput.actionType !== undefined ? category(policyInput.actionType) : parent.context.policy.actionType,
+    destinationCategory:
+      policyInput.destinationCategory !== undefined
+        ? category(policyInput.destinationCategory)
+        : parent.context.policy.destinationCategory,
+    expiry: policyInput.expiry ?? parent.context.policy.expiry,
+    actionCountLimit: policyInput.actionCountLimit ?? 3n,
+    salt: policyInput.salt ?? randomBytes32()
+  };
+
+  const childCtx = { parentId, principalPk, agentPk, policy };
+  const id = pureCircuits.delegatedMandateId(childCtx);
+
+  const record: MandateRecord = {
+    context: { principalPk, agentPk, policy },
+    parentId,
+    principalSecret: parent.agentSecret,
+    agentSecret: subAgentSecret,
+    spentTotal: 0n,
+    spentNonce: new Uint8Array(32)
+  };
+  return { id, record, subAgentSecret, parentId };
+};
