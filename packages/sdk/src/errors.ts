@@ -48,6 +48,25 @@ export class StaleStateError extends WardenError {
   }
 }
 
+/** A delegated mandate tried to exceed, widen or outlive its parent. */
+export class DelegationError extends WardenError {
+  constructor(message: string) {
+    super(message, "DelegationError");
+  }
+}
+/** The mandate (or its parent) is paused — reversible, unlike revocation. */
+export class MandatePausedError extends WardenError {
+  constructor(message: string) {
+    super(message, "MandatePausedError");
+  }
+}
+/** An attestation claimed something the committed spend does not support. */
+export class AttestationError extends WardenError {
+  constructor(message: string) {
+    super(message, "AttestationError");
+  }
+}
+
 // The errors below are specific to a real network-backed `WardenBackend`
 // (`apps/web/src/server/preprod-network.ts`) — the simulator has no proof
 // server, node, indexer, or wallet to fail independently of the circuit
@@ -116,6 +135,11 @@ export function classifyNetworkError(cause: unknown): WardenError {
 }
 
 const PATTERNS: Array<[RegExp, new (message: string) => WardenError]> = [
+  [/attestation false/, AttestationError],
+  [/paused/, MandatePausedError],
+  [/exceeds parent|outlive parent|not inherited from parent|depth limit|bound to a different parent|not a delegated mandate|parent action count/, DelegationError],
+  [/stale or forged parent spend state/, StaleStateError],
+  [/delegator must be|child.s principal secret|parent mandate.s agent|not the authorized sub-agent/, NotAuthorizedError],
   [/no local record for mandate/, NotAuthorizedError],
   [/already exists/, MandateAlreadyExistsError],
   [/unknown mandate/, MandateNotFoundError],
