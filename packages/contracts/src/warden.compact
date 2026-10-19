@@ -1,5 +1,9 @@
 // Warden — privacy-preserving authorization protocol for autonomous agents.
 // See docs/ARCHITECTURE.md, docs/THREAT-MODEL.md, docs/PRIVACY.md.
+//
+// Wave 1: createMandate / authorize / revoke.
+// Wave 2: nested delegation (delegate / authorizeDelegated / revokeDelegated),
+//         reversible pause / resume, and attestSpend (selective disclosure).
 
 pragma language_version >= 0.20;
 
@@ -23,16 +27,37 @@ struct MandateContext {
   policy: Policy;
 }
 
+// A mandate carved out of a parent mandate. The delegating agent is the
+// child's principal; the sub-agent is the child's agent.
+struct DelegatedMandateContext {
+  parentId: Bytes<32>;
+  principalPk: Bytes<32>;
+  agentPk: Bytes<32>;
+  policy: Policy;
+}
+
 // Keyed by mandate id, never by principal/agent identity.
 export ledger registered: Set<Bytes<32>>;
 export ledger revoked: Set<Bytes<32>>;
 export ledger spentCommitment: Map<Bytes<32>, Bytes<32>>;
 export ledger actionCount: Map<Bytes<32>, Counter>;
 
+// Wave 2 additions. Every Wave 1 field above is unchanged.
+// Reversible suspension (revocation stays permanent).
+export ledger paused: Set<Bytes<32>>;
+// child mandate id -> parent mandate id. The delegation tree shape is public
+// by design: revoking a parent must visibly and verifiably cut its children.
+export ledger delegatedFrom: Map<Bytes<32>, Bytes<32>>;
+// Selective-disclosure attestations: "cumulative spend <= ceiling, as of
+// action number N". The real total never leaves the prover.
+export ledger attestedCeiling: Map<Bytes<32>, Uint<64>>;
+export ledger attestedAtCount: Map<Bytes<32>, Uint<64>>;
+
 // Witness output is untrusted; every value is re-verified below.
 witness principalSecret(id: Bytes<32>): Bytes<32>;
 witness agentSecret(id: Bytes<32>): Bytes<32>;
 witness mandateContextOf(id: Bytes<32>): MandateContext;
+witness delegatedMandateContextOf(id: Bytes<32>): DelegatedMandateContext;
 witness spentSoFar(id: Bytes<32>): Uint<64>;
 witness spentNonce(id: Bytes<32>): Bytes<32>;
 witness freshNonce(id: Bytes<32>): Bytes<32>;
@@ -59,6 +84,17 @@ pure circuit policyHash(policy: Policy): Bytes<32> {
 export pure circuit mandateId(ctx: MandateContext): Bytes<32> {
   return persistentHash<Vector<4, Bytes<32>>>([
     pad(32, "warden:mandate:"),
+    ctx.principalPk,
+    ctx.agentPk,
+    policyHash(ctx.policy)
+  ]);
+}
+
+// Distinct domain prefix: a delegated id can never validate as a root id.
+export pure circuit delegatedMandateId(ctx: DelegatedMandateContext): Bytes<32> {
+  return persistentHash<Vector<5, Bytes<32>>>([
+    pad(32, "warden:delegated:"),
+    ctx.parentId,
     ctx.principalPk,
     ctx.agentPk,
     policyHash(ctx.policy)
@@ -104,6 +140,7 @@ export circuit authorize(
   const pid = disclose(id);
   assert(registered.member(pid), "unknown mandate");
   assert(!revoked.member(pid), "mandate revoked");
+  assert(!paused.member(pid), "mandate paused");
 
   const ctx = mandateContextOf(pid);
   assert(mandateId(ctx) == pid, "mandate context does not match its public id");
@@ -143,4 +180,176 @@ export circuit revoke(id: Bytes<32>): [] {
   assert(pkOf(principalSecret(pid)) == ctx.principalPk, "caller is not the principal for this mandate");
 
   revoked.insert(pid);
+}
+
+// ---------------------------------------------------------------------------
+// Wave 2 — pause / resume
+// ---------------------------------------------------------------------------
+
+// Reversible kill-switch. Unlike revoke, a paused mandate can be resumed.
+export circuit pause(id: Bytes<32>): [] {
+  const pid = disclose(id);
+  assert(registered.member(pid), "unknown mandate");
+  assert(!revoked.member(pid), "mandate revoked");
+  assert(!paused.member(pid), "mandate already paused");
+
+  const ctx = mandateContextOf(pid);
+  assert(mandateId(ctx) == pid, "mandate context does not match its public id");
+  assert(pkOf(principalSecret(pid)) == ctx.principalPk, "caller is not the principal for this mandate");
+
+  paused.insert(pid);
+}
+
+export circuit resume(id: Bytes<32>): [] {
+  const pid = disclose(id);
+  assert(registered.member(pid), "unknown mandate");
+  assert(!revoked.member(pid), "mandate revoked");
+  assert(paused.member(pid), "mandate is not paused");
+
+  const ctx = mandateContextOf(pid);
+  assert(mandateId(ctx) == pid, "mandate context does not match its public id");
+  assert(pkOf(principalSecret(pid)) == ctx.principalPk, "caller is not the principal for this mandate");
+
+  paused.remove(pid);
+}
+
+// ---------------------------------------------------------------------------
+// Wave 2 — auditor attestation (selective disclosure)
+// ---------------------------------------------------------------------------
+
+// The agent proves, against the on-chain spend commitment, that cumulative
+// spend is at most `ceiling` — and publishes only the ceiling. Read-only: the
+// spend commitment is not advanced. The attestation is pinned to the action
+// count at proof time, so a stale one is visibly stale.
+export circuit attestSpend(id: Bytes<32>, ceiling: Uint<64>): [] {
+  const pid = disclose(id);
+  assert(registered.member(pid), "unknown mandate");
+
+  const ctx = mandateContextOf(pid);
+  assert(mandateId(ctx) == pid, "mandate context does not match its public id");
+  assert(pkOf(agentSecret(pid)) == ctx.agentPk, "caller is not the authorized agent for this mandate");
+
+  const spent = spentSoFar(pid);
+  const nonce = spentNonce(pid);
+  assert(
+    spentCommitment.lookup(pid) == spendCommitment(spent, nonce),
+    "stale or forged spend state"
+  );
+  assert(spent <= ceiling, "attestation false: spend exceeds ceiling");
+
+  const count = actionCount.lookup(pid).read();
+  attestedCeiling.insert(pid, disclose(ceiling));
+  attestedAtCount.insert(pid, count);
+}
+
+// ---------------------------------------------------------------------------
+// Wave 2 — nested delegation (one hop): Principal -> Agent -> Sub-agent
+// ---------------------------------------------------------------------------
+
+// The parent's agent carves a child mandate out of its own authority.
+// Delegation consumes parent budget and one parent action slot, so sibling
+// children can never jointly exceed the parent's cap.
+export circuit delegate(parentId: Bytes<32>, childId: Bytes<32>): [] {
+  const ppid = disclose(parentId);
+  assert(registered.member(ppid), "unknown parent mandate");
+  assert(!revoked.member(ppid), "parent mandate revoked");
+  assert(!paused.member(ppid), "parent mandate paused");
+  assert(!delegatedFrom.member(ppid), "delegation depth limit: parent is itself delegated");
+
+  const parentCtx = mandateContextOf(ppid);
+  assert(mandateId(parentCtx) == ppid, "parent context does not match its public id");
+  assert(pkOf(agentSecret(ppid)) == parentCtx.agentPk, "caller is not the parent mandate's agent");
+  assert(blockTimeLte(disclose(parentCtx.policy.expiry)), "parent mandate expired");
+
+  const cid = disclose(childId);
+  assert(!registered.member(cid), "mandate already exists");
+  const childCtx = delegatedMandateContextOf(cid);
+  assert(delegatedMandateId(childCtx) == cid, "child context does not match its public id");
+  assert(childCtx.parentId == ppid, "child context bound to a different parent");
+  assert(pkOf(principalSecret(cid)) == childCtx.principalPk, "caller does not hold the child's principal secret");
+  assert(childCtx.principalPk == parentCtx.agentPk, "delegator must be the parent's agent");
+  assert(childCtx.policy.actionCountLimit > 0, "action count limit must be positive");
+  assert(blockTimeLte(disclose(childCtx.policy.expiry)), "child expiry must be in the future");
+
+  assert(childCtx.policy.asset == parentCtx.policy.asset, "asset not inherited from parent");
+  assert(childCtx.policy.actionType == parentCtx.policy.actionType, "action type not inherited from parent");
+  assert(childCtx.policy.destinationCategory == parentCtx.policy.destinationCategory, "destination not inherited from parent");
+  assert(childCtx.policy.expiry <= parentCtx.policy.expiry, "child cannot outlive parent");
+
+  const parentPriorSpent = spentSoFar(ppid);
+  const parentPriorNonce = spentNonce(ppid);
+  assert(
+    spentCommitment.lookup(ppid) == spendCommitment(parentPriorSpent, parentPriorNonce),
+    "stale or forged parent spend state"
+  );
+  const parentNewTotal = parentPriorSpent + childCtx.policy.maxAmount;
+  assert(parentNewTotal <= parentCtx.policy.maxAmount, "delegated cap exceeds parent's remaining budget");
+  const parentPriorCount = actionCount.lookup(ppid).read();
+  assert(parentPriorCount < parentCtx.policy.actionCountLimit as Uint<64>, "parent action count limit reached");
+
+  spentCommitment.insert(ppid, disclose(spendCommitment(parentNewTotal as Uint<64>, freshNonce(ppid))));
+  actionCount.lookup(ppid).increment(1);
+
+  registered.insert(cid);
+  delegatedFrom.insert(cid, ppid);
+  actionCount.insert(cid, default<Counter>);
+  spentCommitment.insert(cid, disclose(spendCommitment(0, freshNonce(cid))));
+}
+
+// The sub-agent acts under its child mandate. Also live-checks the parent's
+// revoked/paused flags: revocation is an event, not a creation-time value.
+export circuit authorizeDelegated(
+  id: Bytes<32>,
+  requestedAmount: Uint<64>,
+  requestedAsset: Bytes<32>,
+  requestedActionType: Bytes<32>,
+  requestedDestinationCategory: Bytes<32>
+): [] {
+  const cid = disclose(id);
+  assert(registered.member(cid), "unknown mandate");
+  assert(delegatedFrom.member(cid), "not a delegated mandate");
+  assert(!revoked.member(cid), "mandate revoked");
+  assert(!paused.member(cid), "mandate paused");
+
+  const ctx = delegatedMandateContextOf(cid);
+  assert(delegatedMandateId(ctx) == cid, "mandate context does not match its public id");
+  assert(pkOf(agentSecret(cid)) == ctx.agentPk, "caller is not the authorized sub-agent for this mandate");
+
+  const pid = disclose(ctx.parentId);
+  assert(!revoked.member(pid), "parent mandate revoked");
+  assert(!paused.member(pid), "parent mandate paused");
+
+  assert(blockTimeLte(disclose(ctx.policy.expiry)), "mandate expired");
+  assert(requestedAsset == ctx.policy.asset, "asset not permitted by mandate");
+  assert(requestedActionType == ctx.policy.actionType, "action type not permitted by mandate");
+  assert(requestedDestinationCategory == ctx.policy.destinationCategory, "destination not permitted by mandate");
+
+  const priorCount = actionCount.lookup(cid).read();
+  assert(priorCount < ctx.policy.actionCountLimit as Uint<64>, "action count limit reached");
+
+  const priorSpent = spentSoFar(cid);
+  const priorNonce = spentNonce(cid);
+  assert(
+    spentCommitment.lookup(cid) == spendCommitment(priorSpent, priorNonce),
+    "stale or forged spend state"
+  );
+  const newTotal = priorSpent + requestedAmount;
+  assert(newTotal <= ctx.policy.maxAmount, "policy violation: amount exceeds mandate cap");
+
+  spentCommitment.insert(cid, disclose(spendCommitment(newTotal as Uint<64>, freshNonce(cid))));
+  actionCount.lookup(cid).increment(1);
+}
+
+// Only the delegating agent (the child's principal) can revoke a child.
+export circuit revokeDelegated(id: Bytes<32>): [] {
+  const cid = disclose(id);
+  assert(registered.member(cid), "unknown mandate");
+  assert(delegatedFrom.member(cid), "not a delegated mandate");
+  assert(!revoked.member(cid), "mandate already revoked");
+
+  const ctx = delegatedMandateContextOf(cid);
+  assert(delegatedMandateId(ctx) == cid, "mandate context does not match its public id");
+  assert(pkOf(principalSecret(cid)) == ctx.principalPk, "caller is not the principal for this mandate");
+
+  revoked.insert(cid);
 }
