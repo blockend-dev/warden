@@ -14,7 +14,7 @@ mandate, by construction, not by convention.
 > and does not claim to, verify what an agent does off-chain — see
 > [Current limitations](#12-current-limitations).
 
-**Live demo:** _free-hosted container — URL goes here after deploy; see [`docs/DEPLOY-FREE.md`](docs/DEPLOY-FREE.md)._
+**Live demo:** [warden-web-latest.onrender.com](https://warden-web-latest.onrender.com)
 Or run it locally in two commands (§11). It runs the real compiled circuits
 in-process; see [§9](#9-demo) for exactly what it is and isn't.
 
