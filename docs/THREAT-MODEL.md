@@ -205,3 +205,39 @@ already passed` / `> accepts an expiry exactly at the current block time`.
   cross-process handoff is a named Wave 2 item, not solved here).
 - Multi-contract composition for delegation (current Compact composability
   limitation, not a Warden design gap — see `docs/ARCHITECTURE.md` §5c).
+
+## Wave 2 attacks
+
+Every case below is a named test in `packages/contracts/src/test/wave2.test.ts`
+(circuit level), `packages/sdk/src/wave2.test.ts` (three-party SDK flow) and a
+scenario in the Attack Lab (`packages/sdk/src/lab.ts`, run live at `/lab`).
+
+| # | Attack | Refused by | Test (describe › case) |
+|---|---|---|---|
+| W1 | Child cap larger than the parent's whole cap | `delegate`: `exceeds parent's remaining budget` | delegate › rejects a child cap larger than the parent's whole cap |
+| W2 | Two siblings jointly exceed the parent cap (double-allocation) | same assert — delegation debits the parent's commitment | delegate › blocks sibling double-allocation |
+| W3 | Delegate around a direct spend (split the pool) | direct spend and delegation share one commitment | delegate › shares one budget pool between direct spend and delegation |
+| W4 | Child outlives parent | `child cannot outlive parent` | delegate › rejects a child that outlives its parent |
+| W5 | Child widens asset / action type / destination | `… not inherited from parent` | delegate › rejects a child that widens the (asset / action type / destination) |
+| W6 | Non-agent delegates (principal, stranger, wrong secret) | `caller is not the parent mandate's agent` / agent-secret witness | delegate › rejects a caller who is not the parent's agent; … the principal trying to delegate |
+| W7 | Delegator identity swap (child principal ≠ parent agent) | `delegator must be the parent's agent` | delegate › rejects a delegator who is not the parent's agent |
+| W8 | Child bound to a different parent than the one being debited | `bound to a different parent` | delegate › rejects a child context bound to a different parent |
+| W9 | Forged child context / missing principal secret | `does not match its public id` / `does not hold the child's principal secret` | delegate › rejects a forged child context…; … lacks the child's principal secret |
+| W10 | Delegate from a revoked / paused / expired / unknown parent | liveness asserts at the top of `delegate` | delegate › rejects delegation from a revoked / paused / expired / unknown parent |
+| W11 | Replay delegation against a stale parent spend state | `stale or forged parent spend state` | delegate › rejects a delegation built from a stale parent spend state |
+| W12 | Second delegation hop | `delegation depth limit` | delegate › refuses a second hop |
+| W13 | Sub-agent acts after the **root** is revoked (own flag untouched) | live parent check in `authorizeDelegated` | authorizeDelegated › is cut off the instant the PARENT is revoked |
+| W14 | Sub-agent acts while the parent is paused | live parent `paused` check | authorizeDelegated › is suspended while the parent is paused and works again after resume |
+| W15 | Delegated id fed to Wave 1 `authorize` (type confusion) | domain-separated ids | authorizeDelegated › refuses a delegated id on the Wave 1 authorize circuit |
+| W16 | Delegating agent acts *as* the sub-agent | distinct secrets | authorizeDelegated › rejects the delegating agent acting as the sub-agent |
+| W17 | Sub-agent revokes its own mandate | `caller is not the principal` | revokeDelegated › rejects the sub-agent trying to revoke its own mandate |
+| W18 | Revoking one child affects a sibling | per-id state only | authorizeDelegated › is blocked by its own revocation but siblings are unaffected |
+| W19 | Agent acts while paused; non-principal pauses; resume a revoked mandate | `paused` / principal asserts | pause / resume › (five cases) |
+| W20 | Attest a ceiling below real spend | `attestation false: spend exceeds ceiling` | attestSpend › refuses to attest a false ceiling |
+| W21 | Attest after understating spend history | `stale or forged spend state` | attestSpend › cannot be forged by understating spend history |
+| W22 | Attest without the agent secret | agent-secret / `not the authorized agent` | attestSpend › requires the agent's secret |
+
+**Not claimed:** the nine-circuit contract has not been deployed to Preprod
+(see `docs/WAVE-2.md` §6); these results are from the simulator running the
+same compiled circuits. Unlinkability of child commitments is tested
+(`keeps the child's spend commitment unlinkable across calls`).

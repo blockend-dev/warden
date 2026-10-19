@@ -98,3 +98,21 @@ That is a zero-knowledge proof-of-compliance problem, not an
 access-control problem, and it is the reason this system requires Midnight's
 specific combination of compiler-enforced disclosure taint, ZK circuits, and
 a public verifiable ledger rather than a database with row-level encryption.
+
+## Wave 2 additions
+
+| Datum | Class | Who can see it |
+|---|---|---|
+| `delegatedFrom[child] = parent` | PUBLIC | Any chain observer. Reveals the delegation tree's **shape** (fan-out, depth) — no policy, amount or identity. Public because Compact requires the key of a ledger `member` check to be disclosed, and the live parent-revocation check needs it |
+| `paused` set membership | PUBLIC | Any chain observer: "this mandate is currently frozen" |
+| `attestedCeiling[id]`, `attestedAtCount[id]` | PUBLIC (opt-in) | Any chain observer — the one spend-related number ever published, and only if the agent chooses to attest. The true total is never revealed; a false ceiling cannot be proven |
+| Child `Policy` (cap, limits, salt), child principal/agent secrets | PRIVATE | Same rules as root mandates: the delegating agent and the sub-agent |
+| Reserved budget for a child | PRIVATE | Folded into the parent's re-randomized `spentCommitment`; indistinguishable from a direct spend |
+
+New proof statements:
+
+- **`delegate`** proves: the prover is the parent's agent; the parent is live (registered, not revoked, not paused, not itself delegated, not expired); the child context hashes to the public child id and is bound to this parent; child expiry ≤ parent expiry; inherited policy fields equal the parent's; the parent's prior spend hashes to its on-chain commitment; and `prior + child cap ≤ parent cap`.
+- **`authorizeDelegated`** proves everything `authorize` does for the child, plus that the parent is **currently** neither revoked nor paused.
+- **`attestSpend`** proves: the prover is the agent and knows the `(total, nonce)` behind the on-chain commitment, with `total ≤ ceiling`.
+
+Cascade revocation is visible to an observer as "parent revoked ⇒ every child edge dead" without any child's own flag changing.
