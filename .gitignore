@@ -39,3 +39,7 @@ infra/devnet/**/midnight-level-db/
 
 # A real (if testnet-only) wallet seed — never committed, even for Preprod.
 infra/devnet/**/.preprod-seed
+
+# Playwright artifacts
+apps/web/test-results/
+apps/web/playwright-report/
