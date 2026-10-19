@@ -138,6 +138,55 @@ const deriveKeysFromSeed = (seed: string) => {
   return derivationResult.keys;
 };
 
+// ---- wallet snapshots ------------------------------------------------------
+// A first Preprod sync takes hours. Each sub-wallet can serialize its sync
+// state, so we persist it periodically (atomic write) and on shutdown, and
+// restore it on boot: a sleep, crash or restart resumes where it stopped.
+// A missing or unreadable snapshot just means a normal fresh sync.
+type WalletSnapshot = { shielded: string; unshielded: string; dust: string; savedAt: string };
+const snapshotPath = (): string => path.resolve(process.env.WARDEN_WALLET_SNAPSHOT ?? path.join(process.cwd(), ".wallet-snapshot.json"));
+
+function loadSnapshot(): WalletSnapshot | undefined {
+  try {
+    const raw = JSON.parse(fs.readFileSync(snapshotPath(), "utf8")) as WalletSnapshot;
+    if (typeof raw.shielded === "string" && typeof raw.unshielded === "string" && typeof raw.dust === "string") return raw;
+  } catch {
+    // none, or unreadable: fall through to a fresh sync
+  }
+  return undefined;
+}
+
+let saving = false;
+async function saveSnapshot(wallet: WalletFacade): Promise<void> {
+  if (saving) return;
+  saving = true;
+  try {
+    const snap: WalletSnapshot = {
+      shielded: await wallet.shielded.serializeState(),
+      unshielded: await wallet.unshielded.serializeState(),
+      dust: await wallet.dust.serializeState(),
+      savedAt: new Date().toISOString()
+    };
+    const tmp = snapshotPath() + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(snap), { mode: 0o600 });
+    fs.renameSync(tmp, snapshotPath());
+  } catch {
+    // A failed snapshot must never take the server down; the next tick retries.
+  } finally {
+    saving = false;
+  }
+}
+
+function startSnapshotting(wallet: WalletFacade): void {
+  const timer = setInterval(() => void saveSnapshot(wallet), 60_000);
+  timer.unref();
+  const flush = () => {
+    void saveSnapshot(wallet).finally(() => process.exit(0));
+  };
+  process.once("SIGTERM", flush);
+  process.once("SIGINT", flush);
+}
+
 async function buildWallet(cfg: PreprodConfig) {
   const keys = deriveKeysFromSeed(cfg.seed);
   const shieldedSecretKeys = ledgerV8.ZswapSecretKeys.fromSeed(keys[Roles.Zswap]);
@@ -151,13 +200,21 @@ async function buildWallet(cfg: PreprodConfig) {
     txHistoryStorage: new NoOpTransactionHistoryStorage(),
     costParameters: { additionalFeeOverhead: 300_000_000_000_000n, feeBlocksMargin: 5 }
   };
+  const snapshot = loadSnapshot();
   const wallet = await WalletFacade.init({
     configuration: walletConfig,
-    shielded: (c: unknown) => ShieldedWallet(c as never).startWithSecretKeys(shieldedSecretKeys),
-    unshielded: (c: unknown) => UnshieldedWallet(c as never).startWithPublicKey(PublicKey.fromKeyStore(unshieldedKeystore)),
-    dust: (c: unknown) => DustWallet(c as never).startWithSecretKey(dustSecretKey, ledgerV8.LedgerParameters.initialParameters().dust)
+    shielded: (c: unknown) =>
+      snapshot ? ShieldedWallet(c as never).restore(snapshot.shielded) : ShieldedWallet(c as never).startWithSecretKeys(shieldedSecretKeys),
+    unshielded: (c: unknown) =>
+      snapshot ? UnshieldedWallet(c as never).restore(snapshot.unshielded) : UnshieldedWallet(c as never).startWithPublicKey(PublicKey.fromKeyStore(unshieldedKeystore)),
+    dust: (c: unknown) =>
+      snapshot
+        ? DustWallet(c as never).restore(snapshot.dust)
+        : DustWallet(c as never).startWithSecretKey(dustSecretKey, ledgerV8.LedgerParameters.initialParameters().dust)
   });
+  if (snapshot) console.log(`[warden] resuming wallet sync from snapshot saved ${snapshot.savedAt}`);
   await wallet.start(shieldedSecretKeys, dustSecretKey);
+  startSnapshotting(wallet);
   return { wallet, shieldedSecretKeys, dustSecretKey, unshieldedKeystore };
 }
 
