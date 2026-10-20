@@ -61,9 +61,9 @@ moving sessions into a database. The image honours `$PORT` (default 7860).
 ## Live Preprod mode is not part of the free setup
 
 `WARDEN_NETWORK=preprod` needs a funded server wallet, a private proof server and a
-multi-hour first wallet sync, and Wave 2's new circuits need a **fresh contract
-deployment** (the Wave 1 address has only three circuits). The procedure is in
-`docs/DEPLOYMENT.md`; build with `--build-arg WITH_PREPROD=1` to include proving keys.
+multi-hour first wallet sync, and Preprod is now reached through Blockfrost (`BLOCKFROST_PROJECT_ID`). The nine-circuit
+contract is already deployed (`docs/DEPLOYMENT-WAVE-2.md`); run it locally with
+`scripts/run-preprod.sh`. See `docs/DEPLOYMENT.md`; build with `--build-arg WITH_PREPROD=1` to include proving keys.
 
 | Variable | Secret? | Value |
 |---|---|---|

@@ -237,7 +237,7 @@ scenario in the Attack Lab (`packages/sdk/src/lab.ts`, run live at `/lab`).
 | W21 | Attest after understating spend history | `stale or forged spend state` | attestSpend › cannot be forged by understating spend history |
 | W22 | Attest without the agent secret | agent-secret / `not the authorized agent` | attestSpend › requires the agent's secret |
 
-**Not claimed:** the nine-circuit contract has not been deployed to Preprod
-(see `docs/WAVE-2.md` §6); these results are from the simulator running the
-same compiled circuits. Unlinkability of child commitments is tested
+**Live evidence:** the same lifecycle, including the refusals W1, W11-style budget checks, W14, W21 and W13 (cascade),
+was also run against the deployed contract on Midnight Preprod (`docs/DEPLOYMENT-WAVE-2.md`, 15/15). The exhaustive
+attack list above runs on the simulator against the same compiled circuits. Unlinkability of child commitments is tested
 (`keeps the child's spend commitment unlinkable across calls`).

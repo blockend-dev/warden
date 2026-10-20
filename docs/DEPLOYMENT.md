@@ -3,7 +3,17 @@
 This document is evidence, not instructions. For how to deploy `apps/web`
 to a free host, see [`docs/DEPLOY-FREE.md`](DEPLOY-FREE.md).
 
-## Deployment status
+## Wave 2 deployment (nine circuits)
+
+**Live on Midnight Preprod:** `4c09848830b6630e045c29433dae38f06b7d03ce55a3aa8953fd9639dffdb15f`
+(deploy tx `0072e052ec03fe1dba01220c328346c4707bc588bb56c3b15bf8ba2bc282750a25`, block 3,064,612). The full Wave 2 lifecycle — delegation, pause/resume,
+attestation, cascade revocation, and every refusal — was run through the web app's own API against
+this contract: 15/15 steps, with transaction hashes and block numbers in
+[`docs/DEPLOYMENT-WAVE-2.md`](DEPLOYMENT-WAVE-2.md). Midnight retired its hosted Preprod indexer on
+2026-10-09; this run used Blockfrost (`BLOCKFROST_PROJECT_ID`), see `.env.example`. The Wave 1
+contract below is unchanged and remains on-chain.
+
+## Deployment status (Wave 1, three circuits)
 
 **REAL MIDNIGHT PREPROD DEPLOYMENT VERIFIED.**
 

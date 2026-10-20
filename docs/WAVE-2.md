@@ -105,12 +105,11 @@ secrets — and shows what a third party can and cannot learn, including the del
   child's private spend total — a Wave 3 item).
 - `attestSpend` covers root mandates only.
 - The principal → agent handoff is still not an encrypted channel.
-- **The Wave 1 Preprod contract (`a61fb34…`) has only three circuits.** Wave 2's circuits
-  are proven by the simulator suites (96 contract tests, 24 SDK tests, 13 browser tests) and
-  compile with both Compact 0.34.0 and 0.31.1 (full proving-key generation for all nine
-  circuits is part of the build), but a new Preprod deployment was **not** performed in this
-  Wave. `apps/web`'s Preprod backend is updated to the generic `call` interface and the new
-  witnesses; deploying the nine-circuit contract is the first Wave 3 task.
+- **Preprod:** the nine-circuit contract is **deployed and verified on Midnight Preprod**
+  (`4c09848830b6630e045c29433dae38f06b7d03ce55a3aa8953fd9639dffdb15f`); see `docs/DEPLOYMENT-WAVE-2.md`. The hosted free demo still runs on the
+  simulator and labels itself so — the live backend needs a funded wallet, a private proof server
+  and a synced wallet, which a free sleeping container cannot hold. The Preprod-backed app is run
+  with `scripts/run-preprod.sh`.
 - The hosted demo runs on the simulator (badge: `DEMO · SIMULATOR`), never claiming otherwise.
 
 ## 7. Reproduce it
