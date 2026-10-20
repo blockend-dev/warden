@@ -86,7 +86,7 @@ const SLIDES: Slide[] = [
         </p>
         <div className="flex flex-wrap gap-2">
           <Pill tone="violet">9 Compact circuits</Pill>
-          <Pill tone="sky">Live on Midnight Preprod (Wave 1)</Pill>
+          <Pill tone="sky">Live on Midnight Preprod</Pill>
           <Pill tone="emerald">Apache-2.0</Pill>
         </div>
       </div>
@@ -132,7 +132,7 @@ const SLIDES: Slide[] = [
   },
   {
     kicker: "What shipped in Wave 1",
-    title: <>A frozen, audited primitive — live on Preprod.</>,
+    title: <>A frozen, audited primitive — now nine circuits, live on Preprod.</>,
     body: (
       <div className="grid gap-4 sm:grid-cols-3">
         <Big n="3" label="circuits: create · authorize · revoke" />
@@ -214,7 +214,7 @@ const SLIDES: Slide[] = [
         <Big n="9" label="state-changing circuits" tone="text-violet-600" />
         <Big n="96" label="contract tests" tone="text-emerald-600" />
         <Big n="19" label="live attack scenarios" tone="text-rose-600" />
-        <Big n="100%" label="of lab scenarios behave as promised" tone="text-sky-600" />
+        <Big n="15/15" label="live Preprod lifecycle steps, 9 real txs" tone="text-sky-600" />
       </div>
     )
   },
