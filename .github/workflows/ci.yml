@@ -14,7 +14,7 @@ jobs:
           "$HOME/.local/bin/compact" update 0.34.0
           "$HOME/.local/bin/compact" update 0.31.1 --no-set-default
       - run: npm install --legacy-peer-deps
-      - name: Compile contract (technical gate: must compile with both compilers)
+      - name: "Compile contract (technical gate, both compilers)"
         run: |
           npm run compact:fast --workspace packages/contracts
           npm run compact:legacy:fast --workspace apps/web
