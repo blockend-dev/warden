@@ -34,6 +34,11 @@ Full detail and honest limits: [`docs/WAVE-2.md`](docs/WAVE-2.md).
 | **Public verifier** (`/verify`) | Paste any mandate id: see exactly what a third party can and cannot learn. |
 | **Redesigned UI** | White-family glassmorphism, anime.js motion, delegation graph, toasts, audit-packet export, in-app pitch deck (`/deck`). |
 
+**Live on Midnight Preprod:** all nine circuits, contract
+`4c09848830b6630e045c29433dae38f06b7d03ce55a3aa8953fd9639dffdb15f`. The complete Wave 2 lifecycle ran through the
+web app's own API against it — 15/15 steps with real ZK proofs and transactions, every attack
+refused ([`docs/DEPLOYMENT-WAVE-2.md`](docs/DEPLOYMENT-WAVE-2.md)).
+
 Verification: **9 circuits** (was 3), **96 contract tests** (was 36), 24 SDK tests,
 3 adapter tests and **13 Playwright browser tests** — all passing.
 
@@ -386,10 +391,10 @@ to test names. Run all three with `npm test`.
 - **Principal→agent handoff is not yet a secured channel.** The MVP
   colocates the roles' secrets in one demo session for simplicity; a real
   encrypted handoff is a named Wave 3 item.
-- **The nine-circuit Wave 2 contract is not yet deployed to Preprod** — the
-  live Wave 1 address has three circuits. Wave 2 is verified on the simulator
-  (96 contract tests) and compiles with both compiler versions;
-  see [`docs/WAVE-2.md`](docs/WAVE-2.md) §6.
+- **The hosted demo runs on the simulator** (badge: `DEMO · SIMULATOR`). The nine-circuit
+  contract itself is live on Preprod and was verified end to end through the app's own API
+  (`docs/DEPLOYMENT-WAVE-2.md`); a free container cannot hold the funded wallet, private proof
+  server and synced wallet that live mode needs.
 - **Delegation depth is one hop** (Principal → Agent → Sub-agent). Cross-contract hierarchical delegation is not yet possible — a current
   Compact composability limitation, not a Warden design gap. See
   [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) §7.
@@ -401,8 +406,7 @@ to test names. Run all three with `npm test`.
 disclosure. **Still open from the original Wave 2 list:** richer policy
 composition (allow-lists) and an encrypted principal→agent handoff.
 
-**Wave 3 — next.** Deploy the nine-circuit contract to Preprod and re-run the
-live lifecycle; deeper delegation chains and reservation reclaim on revoke;
+**Wave 3 — next.** Deeper delegation chains and reservation reclaim on revoke;
 allow-list policies; the encrypted handoff channel.
 
 **Beyond.** An open SDK/protocol other agent
