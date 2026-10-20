@@ -22,9 +22,14 @@ run against the real compiled circuits. Every refusal shown is a circuit `assert
 graph, a public verifier (what a third party can and cannot learn), audit-packet export and
 an in-app pitch deck.
 
-**Honest limits:** the nine-circuit contract is verified on the simulator and compiles with
-Compact 0.34.0 and 0.31.1; it has not yet been deployed to Preprod (the Wave 1 address has
-three circuits). Delegation depth is one hop. Details: `docs/WAVE-2.md` §6.
+**Live on Preprod:** the nine-circuit contract is deployed on Midnight Preprod
+(`4c09848830b6630e045c29433dae38f06b7d03ce55a3aa8953fd9639dffdb15f`) and the full lifecycle — delegation, pause/resume, attestation, cascade
+revocation and every refusal — ran through the web app's own API against it: 15/15 steps,
+real proofs and transactions (`docs/DEPLOYMENT-WAVE-2.md`).
+
+**Honest limits:** delegation depth is one hop; the free hosted demo runs on the simulator
+and says so (live mode needs a funded wallet and private proof server). Details:
+`docs/WAVE-2.md` §6.
 
 ## What changed since the previous submission
 See the table at the top of the README and `docs/WAVE-2.md`. Wave 1 circuits are unchanged
