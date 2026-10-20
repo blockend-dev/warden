@@ -201,11 +201,31 @@ async function saveSnapshot(wallet: WalletFacade): Promise<void> {
 
 /** Surfaces real sync progress (applied / highest chain index) in the status
  * detail while the wallet catches up, so an hours-long first sync is visible. */
+// A laptop sleep (or a dropped websocket) can leave the wallet's connections
+// stale: it keeps running but makes no progress. If the dust wallet applies
+// nothing for STALL_MS while still catching up, save a snapshot and exit with
+// code 75 so scripts/run-preprod.sh restarts the process and reconnects.
+const STALL_MS = 4 * 60_000;
+let lastApplied = -1;
+let lastMoved = Date.now();
+
 async function reportProgress(wallet: WalletFacade): Promise<void> {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- progress lives on a nested wallet-sdk state object
     const st: any = await Rx.firstValueFrom(wallet.state());
     const p = st.shielded?.progress ?? st.shielded?.state?.progress;
+    const dustProgress = st.dust?.progress ?? st.dust?.state?.progress;
+    if (!st.isSynced && dustProgress) {
+      const applied = Number(dustProgress.appliedIndex);
+      if (applied !== lastApplied) {
+        lastApplied = applied;
+        lastMoved = Date.now();
+      } else if (Date.now() - lastMoved > STALL_MS) {
+        console.log("[warden] sync stalled; saving snapshot and restarting to reconnect");
+        await saveSnapshot(wallet);
+        process.exit(75);
+      }
+    }
     const j = (x: unknown) => JSON.stringify(x, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
     console.log("[warden] sync detail:", "isSynced", st.isSynced, "shielded", j(p), "unshielded", j(st.unshielded?.progress), "dust", j(st.dust?.progress ?? st.dust?.state?.progress));
     if (!p || status.phase !== "syncing") return;

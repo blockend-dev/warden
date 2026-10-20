@@ -16,5 +16,14 @@ export WARDEN_PROOF_SERVER_URL="${WARDEN_PROOF_SERVER_URL:-http://127.0.0.1:6300
 export PORT="${PORT:-3100}"
 [ -f apps/web/.next/BUILD_ID ] || npm run build --workspace apps/web
 cd apps/web
-# Mask the Blockfrost project id, which the RPC client logs inside URLs.
-exec npx next start 2>&1 | sed -u 's/project_id=[A-Za-z0-9]*/project_id=***/g'
+# Restart automatically when the app exits with 75 (stalled sync after a
+# sleep/disconnect); the wallet resumes from its snapshot each time. Mask the
+# Blockfrost project id, which the RPC client logs inside URLs.
+while true; do
+  set +e
+  npx next start 2>&1 | sed -u 's/project_id=[A-Za-z0-9]*/project_id=***/g'
+  code=${PIPESTATUS[0]}
+  set -e
+  [ "$code" = "75" ] || exit "$code"
+  echo "[run-preprod] restarting after stall"; sleep 3
+done
