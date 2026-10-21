@@ -14,6 +14,7 @@
 //    showing LIVE.
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type NetworkStatus =
   | { mode: "simulator" }
@@ -90,9 +91,19 @@ export function EnvironmentBadge() {
 
   if (status.mode === "simulator") {
     return (
-      <Pill tone="muted" title={SESSION_DETAIL}>
-        Demo · Simulator
-      </Pill>
+      <span className="inline-flex items-center gap-1.5">
+        <Pill tone="muted" title={SESSION_DETAIL}>
+          Demo · Simulator
+        </Pill>
+        <Link
+          href="/preprod"
+          title="The same contract is deployed and verified on Midnight Preprod — see the on-chain evidence"
+          className="hidden items-center gap-1.5 whitespace-nowrap rounded-full border border-emerald-500/30 bg-emerald-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-700 transition hover:bg-emerald-100 sm:inline-flex sm:text-[11px]"
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Preprod evidence ↗
+        </Link>
+      </span>
     );
   }
 
