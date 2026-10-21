@@ -170,6 +170,17 @@ test("Agent swarm: rogue agents are blocked and nothing survives the root revoca
   await expect(page.getByText("Circuit feed")).toBeVisible();
 });
 
+test("Preprod evidence page lists the deployed contract and every lifecycle step", async ({ page }) => {
+  await page.goto("/preprod");
+  await expect(page.getByText("live on Midnight Preprod.")).toBeVisible();
+  await expect(page.getByText("15/15 steps behaved", { exact: false })).toBeVisible();
+  await expect(page.locator("tbody tr")).toHaveCount(15);
+  await expect(page.getByText("none — the proof cannot be built").first()).toBeVisible();
+  await page.getByRole("button", { name: "Verify on-chain now" }).click();
+  // Without an indexer key configured the page says so honestly; with one it confirms the contract.
+  await expect(page.getByText(/cannot query the chain live|The indexer returns this contract|did not answer/)).toBeVisible();
+});
+
 test("deck navigates with the keyboard", async ({ page }) => {
   await page.goto("/deck");
   await expect(page.locator("h1").first()).toContainText("real authority");
